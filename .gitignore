@@ -1,0 +1,29 @@
+# Build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Go workspace files are developer-local
+go.work
+go.work.sum
+
+# Recorded probe output. Fixture bundles that have been reviewed and redacted
+# are committed under testdata/ explicitly; everything written by a live probe
+# run lands here first and is never committed by accident.
+/probe-out/
+*.probe.json
+
+# Credentials. Nothing matching these should ever exist in the tree, but a
+# stray file must not become a commit.
+*.env
+!.env.example
+*.token
+secrets/
+romm.env
+
+# Editor and OS noise
+.idea/
+.vscode/
+.DS_Store
