@@ -62,7 +62,7 @@ func New(opts Options) *Server {
 		opts.AuthScheme = "bearer"
 	}
 	if opts.Version == "" {
-		opts.Version = "3.11.0"
+		opts.Version = "5.0.0"
 	}
 	if opts.SpecPath == "" {
 		opts.SpecPath = "/openapi.json"
@@ -199,9 +199,12 @@ func (s *Server) spec() map[string]any {
 			{"name": "search_term", "in": "query"},
 		},
 	})
-	add("/api/roms", "post", map[string]any{"operationId": "add_rom"})
 	add("/api/roms/{id}", "get", map[string]any{"operationId": "get_rom"})
-	add("/api/roms/{id}/content/{file_name}", "get", map[string]any{"operationId": "get_rom_content"})
+	add("/api/roms/{id}/files/content/{file_name}", "get", map[string]any{"operationId": "get_romfile_content"})
+	add("/api/roms/upload/start", "post", map[string]any{"operationId": "start_chunked_upload"})
+	add("/api/roms/upload/{upload_id}", "put", map[string]any{"operationId": "upload_chunk"})
+	add("/api/roms/upload/{upload_id}/complete", "post", map[string]any{"operationId": "complete_chunked_upload"})
+	add("/api/roms/upload/{upload_id}/cancel", "post", map[string]any{"operationId": "cancel_chunked_upload"})
 
 	return map[string]any{
 		"openapi": "3.1.0",
