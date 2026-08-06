@@ -164,14 +164,74 @@ func TestConfirmedDeletionRemovesTheSource(t *testing.T) {
 	}
 }
 
-// A missing failure-domain key must not silently merge independent operators.
-func TestMissingFailureDomainDoesNotCollapseOperators(t *testing.T) {
+// Missing failure-domain data is not evidence that Bridges are independent.
+// Unknown sources establish that at least one copy exists, but must never make
+// an item look resilient on their own.
+func TestMissingFailureDomainDoesNotCreateFalseResilience(t *testing.T) {
 	a := replica("alias-a", "")
 	b := replica("alias-b", "")
+	c := replica("alias-c", "")
 
-	got := Assess([]Replica{a, b}, DefaultRules(), now)
-	if got.Independent != 2 {
-		t.Fatalf("independent = %d, want 2: an unknown domain must not merge two operators", got.Independent)
+	got := Assess([]Replica{a, b, c}, DefaultRules(), now)
+	if got.Independent != 1 {
+		t.Fatalf("independent = %d, want 1: unknown ownership cannot prove independent failure domains", got.Independent)
+	}
+	if got.Risk != RiskAtRisk {
+		t.Fatalf("risk = %s, want at_risk: three unknown domains must not appear resilient", got.Risk)
+	}
+	if got.Confirmed != 3 || got.Online != 3 {
+		t.Fatalf("confirmed = %d online = %d, want 3 and 3: the raw source counts must remain visible", got.Confirmed, got.Online)
+	}
+}
+
+func TestDuplicateBridgeAliasDoesNotInflateCounts(t *testing.T) {
+	one := replica("same-bridge", "operator-1")
+	duplicate := one
+
+	got := Assess([]Replica{one, duplicate}, DefaultRules(), now)
+	if got.Confirmed != 1 || got.Online != 1 || got.Independent != 1 {
+		t.Fatalf("duplicate claim produced confirmed=%d online=%d independent=%d, want 1/1/1",
+			got.Confirmed, got.Online, got.Independent)
+	}
+	if got.Risk != RiskAtRisk {
+		t.Fatalf("risk = %s, want at_risk", got.Risk)
+	}
+
+	// One Bridge claiming contradictory ownership is still one Bridge and is
+	// conservatively assigned to the shared unknown bucket.
+	contradictory := duplicate
+	contradictory.FailureDomain = "operator-2"
+	got = Assess([]Replica{one, contradictory}, DefaultRules(), now)
+	if got.Independent != 1 {
+		t.Fatalf("one Bridge in contradictory domains counted as %d independent replicas", got.Independent)
+	}
+}
+
+func TestFutureVerificationTimestampDoesNotCount(t *testing.T) {
+	future := replica("future-bridge", "operator-1")
+	future.LastVerifiedAt = now.Add(24 * time.Hour)
+
+	got := Assess([]Replica{future}, DefaultRules(), now)
+	if got.Independent != 0 {
+		t.Fatalf("future-dated claim counted as %d independent replicas", got.Independent)
+	}
+	if got.Risk != RiskStale {
+		t.Fatalf("risk = %s, want stale for an online source with no valid recent verification", got.Risk)
+	}
+}
+
+func TestTombstoneDominatesDuplicateClaim(t *testing.T) {
+	active := replica("same-bridge", "operator-1")
+	removed := active
+	removed.Availability = protocol.AvailRemoved
+
+	got := Assess([]Replica{active, removed}, DefaultRules(), now)
+	if got.Confirmed != 0 || got.Online != 0 || got.Independent != 0 {
+		t.Fatalf("tombstoned duplicate produced confirmed=%d online=%d independent=%d, want 0/0/0",
+			got.Confirmed, got.Online, got.Independent)
+	}
+	if got.Risk != RiskMissing {
+		t.Fatalf("risk = %s, want missing", got.Risk)
 	}
 }
 
