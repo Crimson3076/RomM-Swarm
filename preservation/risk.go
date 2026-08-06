@@ -112,7 +112,7 @@ type Rules struct {
 // last month stops being counted as redundancy.
 func DefaultRules() Rules {
 	return Rules{
-		Version:            "1",
+		Version:            "2",
 		RevalidationWindow: 30 * 24 * time.Hour,
 		AtRiskAt:           1,
 		FragileAt:          2,
@@ -122,12 +122,11 @@ func DefaultRules() Rules {
 
 // Assessment is the computed preservation position for one item.
 type Assessment struct {
-	// Confirmed is every replica the Swarm knows about, in any state. This is
-	// the number that looks best and means least, so it is reported alongside
-	// the others rather than instead of them.
+	// Confirmed is every distinct, non-removed Bridge source the Swarm knows
+	// about, in any state. Duplicate records for one Bridge count once.
 	Confirmed int
 
-	// Online is how many replicas could serve right now.
+	// Online is how many distinct Bridges could serve right now.
 	Online int
 
 	// Independent is the number of distinct failure domains holding a recently
@@ -144,7 +143,6 @@ type Assessment struct {
 // Assess computes the preservation position for one item.
 func Assess(replicas []Replica, rules Rules, now time.Time) Assessment {
 	a := Assessment{
-		Confirmed:    len(replicas),
 		RulesVersion: rules.Version,
 	}
 
@@ -153,15 +151,32 @@ func Assess(replicas []Replica, rules Rules, now time.Time) Assessment {
 		return a
 	}
 
-	domains := map[string]bool{}
+	// Inventory deltas, retries, and reconciliation can temporarily place more
+	// than one record for a Bridge in an input set. Aggregate by alias before
+	// counting so duplicated claims cannot manufacture availability or
+	// resilience. A tombstone wins when contradictory records are present,
+	// because without revision ordering the safe answer is that the source is no
+	// longer confirmed.
+	type bridgeSummary struct {
+		removed       bool
+		present       bool
+		online        bool
+		recentDomains map[string]bool
+	}
+	byBridge := map[protocol.BridgeAlias]*bridgeSummary{}
 	for _, r := range replicas {
+		s := byBridge[r.Alias]
+		if s == nil {
+			s = &bridgeSummary{recentDomains: map[string]bool{}}
+			byBridge[r.Alias] = s
+		}
 		if r.Availability == protocol.AvailRemoved {
-			// A confirmed deletion removes that Bridge as a source entirely.
-			a.Confirmed--
+			s.removed = true
 			continue
 		}
+		s.present = true
 		if r.Availability.CountsTowardResilience() {
-			a.Online++
+			s.online = true
 		}
 		if !recentlyRevalidated(r, rules, now) {
 			continue
@@ -169,14 +184,36 @@ func Assess(replicas []Replica, rules Rules, now time.Time) Assessment {
 		if !r.Availability.CountsTowardResilience() {
 			continue
 		}
-		// An empty failure domain is treated as its own domain rather than as a
-		// shared one, so a missing key cannot silently collapse independent
-		// operators into a single count.
+		// An empty failure domain is unknown, not evidence of independence. All
+		// unknown domains share one conservative bucket so they can establish
+		// that at least one copy exists without manufacturing resilience.
 		key := r.FailureDomain
 		if key == "" {
-			key = "unknown:" + string(r.Alias)
+			key = "unknown"
 		}
-		domains[key] = true
+		s.recentDomains[key] = true
+	}
+
+	domains := map[string]bool{}
+	for _, s := range byBridge {
+		if s.removed || !s.present {
+			continue
+		}
+		a.Confirmed++
+		if s.online {
+			a.Online++
+		}
+
+		// One Bridge can never create more than one independent replica. If
+		// contradictory records assign it to multiple domains, classify the
+		// ownership as unknown rather than choosing whichever record arrived first.
+		if len(s.recentDomains) == 1 {
+			for domain := range s.recentDomains {
+				domains[domain] = true
+			}
+		} else if len(s.recentDomains) > 1 {
+			domains["unknown"] = true
+		}
 	}
 	a.Independent = len(domains)
 
@@ -202,6 +239,13 @@ func Assess(replicas []Replica, rules Rules, now time.Time) Assessment {
 // inside the window.
 func recentlyRevalidated(r Replica, rules Rules, now time.Time) bool {
 	if r.LastVerifiedAt.IsZero() {
+		return false
+	}
+	// Verification time is security-sensitive input. A future timestamp must
+	// not keep a claim fresh indefinitely. Production ingestion should stamp or
+	// validate this at the Host boundary as well; the metric remains defensive
+	// when handed untrusted records directly.
+	if r.LastVerifiedAt.After(now) {
 		return false
 	}
 	return !r.LastVerifiedAt.Before(now.Add(-rules.RevalidationWindow))
