@@ -35,9 +35,10 @@ token, commit the bundle under `fixtures/`, correct any capability whose
 candidate paths did not match, and set [ADR 0003](../adr/0003-supported-romm-versions.md)
 to Accepted.
 
-The endpoints in `bridge/romm/capability.go` are **assumptions until this is
-done.** They are held as a data table with a self-correcting probe precisely
-because they are assumptions.
+The RomM 5.0 endpoints in `bridge/romm/capability.go` are backed by upstream
+source inspection, including the `roms.read` download and `roms.write` chunked
+upload routes. Their behavior with a real scoped user, reverse proxy, watcher,
+and library remains unproven until the live exercise is recorded.
 
 ### 2. Filesystem publication mode works only after explicit operator configuration, and its writable-mount trust boundary is documented
 
@@ -149,7 +150,7 @@ codebase. No transfer code has been written, deliberately.
 
 | # | Blocker | Workaround | Deferred to |
 |---|---|---|---|
-| B1 | **No live RomM instance was reachable.** The build environment's network egress policy denied the CONNECT to the target server (the proxy answered 403), so no request was ever sent. | The probe is built and tested against a fake server. RomM's real paths are held as a correctable data table, and the probe reports every path the real server documents so a mismatch is one line to fix. | Run `make probe` from an environment that can reach the server. |
+| B1 | **No live RomM instance was reachable.** The build environment's network egress policy denied the CONNECT to the target server (the proxy answered 403), so no request was ever sent. | The probe is built and tested against a RomM 5.0 source-backed fake. The real paths are held as a correctable data table, and the probe reports every path the deployed server documents. | Run `make probe` and the opt-in synthetic upload exercise from an environment that can reach the server. |
 | B2 | **Direct-plus-relay under CGNAT is unproven.** The Phase 0 go/stop gate. | None. It needs two hosts, one genuinely behind CGNAT. A simulated CGNAT is worth doing first but is not sufficient evidence — the failure modes that matter are carrier-specific. | [ADR 0002](../adr/0002-networking-stack.md). |
 | B3 | **No reference catalogues are committed.** No-Intro DATs are not redistributed here. | The importer is proven against synthesised catalogues with real hashes. | Obtain and lock the approved DATs for the five platforms; record versions in [ADR 0004](../adr/0004-initial-platforms.md). |
 | B4 | **Legal risk acceptance is not done.** | None, and none is appropriate. | [ADR 0008](../adr/0008-pilot-legal-risk-acceptance.md). |
