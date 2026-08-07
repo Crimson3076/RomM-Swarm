@@ -25,7 +25,7 @@ func probeAgainst(t *testing.T, srv *fakeromm.Server, opts ProbeOptions) *Report
 // "Confirm supported RomM versions and relevant API endpoints", exercised
 // end to end.
 func TestPhase0_ProbeConfirmsRequiredCapabilities(t *testing.T) {
-	srv := fakeromm.New(fakeromm.Options{Token: testToken, Version: "3.11.0"})
+	srv := fakeromm.New(fakeromm.Options{Token: testToken, Version: "5.0.0"})
 	defer srv.Close()
 
 	rep := probeAgainst(t, srv, ProbeOptions{Token: testToken})
@@ -33,8 +33,8 @@ func TestPhase0_ProbeConfirmsRequiredCapabilities(t *testing.T) {
 	if len(rep.Blockers) != 0 {
 		t.Fatalf("a fully capable server produced blockers: %v", rep.Blockers)
 	}
-	if rep.ServerVersion != "3.11.0" {
-		t.Errorf("server version = %q, want 3.11.0", rep.ServerVersion)
+	if rep.ServerVersion != "5.0.0" {
+		t.Errorf("server version = %q, want 5.0.0", rep.ServerVersion)
 	}
 	if rep.AuthScheme != "bearer" {
 		t.Errorf("auth scheme = %q, want bearer", rep.AuthScheme)
@@ -73,7 +73,7 @@ func TestPhase0_ProbeConfirmsRequiredCapabilities(t *testing.T) {
 func TestPhase0_MissingRequiredCapabilityIsABlocker(t *testing.T) {
 	srv := fakeromm.New(fakeromm.Options{
 		Token:     testToken,
-		OmitPaths: []string{"/api/roms/{id}/content/{file_name}"},
+		OmitPaths: []string{"/api/roms/{id}/files/content/{file_name}"},
 	})
 	defer srv.Close()
 
@@ -103,6 +103,32 @@ func TestPhase0_MissingRequiredCapabilityIsABlocker(t *testing.T) {
 	}
 	if len(rep.PathInventory) == 0 {
 		t.Error("the report carries no path inventory, so a mismatch cannot be corrected")
+	}
+}
+
+// Current RomM uses a three-step chunked upload. Finding only the start route
+// is not enough: the Bridge must be able to send chunks and atomically complete
+// the session before API-only publication is viable.
+func TestPhase0_EveryChunkedUploadStageIsRequired(t *testing.T) {
+	cases := []struct {
+		path string
+		id   string
+	}{
+		{"/api/roms/upload/start", "roms.upload.start"},
+		{"/api/roms/upload/{upload_id}", "roms.upload.chunk"},
+		{"/api/roms/upload/{upload_id}/complete", "roms.upload.complete"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.id, func(t *testing.T) {
+			srv := fakeromm.New(fakeromm.Options{Token: testToken, OmitPaths: []string{tc.path}})
+			defer srv.Close()
+
+			rep := probeAgainst(t, srv, ProbeOptions{Token: testToken})
+			if !strings.Contains(strings.Join(rep.Blockers, " "), tc.id) {
+				t.Fatalf("missing %s did not produce a blocker: %v", tc.id, rep.Blockers)
+			}
+		})
 	}
 }
 

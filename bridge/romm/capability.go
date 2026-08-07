@@ -103,22 +103,47 @@ func Requirements() []Requirement {
 			Needs:    "Prove API-only mode: download, local staging and verification",
 			Required: true,
 			Candidates: []Candidate{
+				{"GET", "/api/roms/*/files/content/*"},
 				{"GET", "/api/roms/*/content/*"},
 				{"GET", "/api/roms/*/content"},
 				{"GET", "/api/roms/*/download"},
 			},
 		},
 		{
-			ID:      "roms.upload",
-			Summary: "upload a ROM using a scoped standard-user token",
+			ID:      "roms.upload.start",
+			Summary: "start a chunked ROM upload using a scoped standard-user token",
 			Needs: "Verify standard-user Client API Token behavior for roms.write upload without administrator access; " +
 				"prove API-only mode chunked upload to RomM",
 			Required: true,
 			Candidates: []Candidate{
-				{"POST", "/api/roms"},
-				{"PUT", "/api/roms"},
-				{"POST", "/api/roms/upload"},
-				{"POST", "/api/uploads"},
+				{"POST", "/api/roms/upload/start"},
+			},
+		},
+		{
+			ID:       "roms.upload.chunk",
+			Summary:  "send one bounded chunk to an active ROM upload",
+			Needs:    "Prove API-only mode chunked upload to RomM",
+			Required: true,
+			Candidates: []Candidate{
+				{"PUT", "/api/roms/upload/*"},
+			},
+		},
+		{
+			ID:       "roms.upload.complete",
+			Summary:  "assemble and publish a completed chunked ROM upload",
+			Needs:    "Prove API-only mode chunked upload to RomM and define the ingestion wait state",
+			Required: true,
+			Candidates: []Candidate{
+				{"POST", "/api/roms/upload/*/complete"},
+			},
+		},
+		{
+			ID:       "roms.upload.cancel",
+			Summary:  "cancel an interrupted ROM upload and remove its temporary chunks",
+			Needs:    "Define interrupted-upload cleanup and crash recovery",
+			Required: false,
+			Candidates: []Candidate{
+				{"POST", "/api/roms/upload/*/cancel"},
 			},
 		},
 		{

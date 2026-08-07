@@ -110,10 +110,11 @@ to be committed.
 
 Exit code 2 means a required capability is missing — usable as a script gate.
 
-**The capability table is currently an assumption.** It was written without
-access to a live RomM instance. When a candidate path does not match, the bundle
-prints every path the server does document, and the fix is one line in
-`bridge/romm/capability.go`.
+The capability table is anchored to RomM 5.0's upstream routes, including its
+three-step chunked upload API. It has not yet been exercised against a live
+deployment with a scoped standard-user token. When a candidate path does not
+match, the bundle prints every path the server does document, and the fix stays
+isolated in `bridge/romm/capability.go`.
 
 ### `swarm-verify` — compute the four identities for files on disk
 

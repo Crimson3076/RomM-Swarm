@@ -34,14 +34,32 @@ implements this:
 A version allowlist is then derived from probe evidence rather than guessed at:
 "these versions were probed, these capabilities were present, these were not".
 
-### Why not hard-code the endpoints
+### First compatibility target
 
-Because the endpoints in the capability table are currently an **assumption**.
-They were written without access to a live RomM instance — the session that wrote
-them had outbound access to the target server denied by network policy. Encoding
-that assumption as a data table with a probe that reports mismatches makes it
-self-correcting: when a path is wrong, the probe prints the real one next to the
-one that was looked for, and the fix is one line in the table.
+RomM 5.0 is the first source-backed target. The candidate operations are tied to
+[upstream commit `960e18d`](https://github.com/rommapp/romm/tree/960e18df77da261d082f49205d809549a1c994a1):
+
+- [Client API Tokens](https://github.com/rommapp/romm/blob/960e18df77da261d082f49205d809549a1c994a1/backend/handler/auth/hybrid_auth.py)
+  are bearer credentials whose effective scopes are the intersection of the
+  token and owning user's scopes.
+- [`GET /api/roms/{id}/files/content/{file_name}`](https://github.com/rommapp/romm/blob/960e18df77da261d082f49205d809549a1c994a1/backend/endpoints/roms/files.py)
+  requires `roms.read`.
+- Chunked upload is `POST /api/roms/upload/start`, `PUT
+  /api/roms/upload/{upload_id}`, and `POST
+  /api/roms/upload/{upload_id}/complete`; every step requires `roms.write`, not
+  administrator status. The routes are defined in
+  [`upload.py`](https://github.com/rommapp/romm/blob/960e18df77da261d082f49205d809549a1c994a1/backend/endpoints/roms/upload.py).
+- Interrupted sessions can be cleaned up with `POST
+  /api/roms/upload/{upload_id}/cancel`.
+
+Source inspection proves the intended authorization and route shape. It does
+not prove a real reverse-proxied deployment, token configuration, ingestion
+latency, or watcher behavior, so this ADR remains Open until a live probe and
+synthetic upload exercise are recorded.
+
+The table remains capability-based instead of hard-coding a version allowlist.
+When a path changes, the probe prints the server's documented operation next to
+what was expected, and the adapter can be corrected in one place.
 
 Hard-coding the same assumption into client code would have produced software
 that fails at runtime with a 404 and no explanation.
@@ -78,7 +96,6 @@ that fails at runtime with a 404 and no explanation.
 - Which RomM major versions does the pilot need to support at once? Supporting
   one is far cheaper than supporting a range, and the answer depends on what the
   pilot operators are actually running.
-- Does the Client API Token carry inspectable scopes? If it does, the Bridge can
-  self-test its permissions at setup time, which Phase 1 lists as a deliverable
-  ("Scope and permission self-test"). If it does not, the self-test has to be
-  behavioural, which is more intrusive against a live library.
+- Which response should the Bridge treat as the authoritative effective-scope
+  view: `/api/users/me`, `/api/permissions/me`, or both? The upstream model is
+  inspectable, but the live response schema still needs to be captured.
