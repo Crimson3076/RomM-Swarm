@@ -2,7 +2,7 @@
 //
 // Scope of Work §3: "Resilience counts recently revalidated replicas across
 // distinct operators or failure domains, not raw Bridge claims." That sentence
-// is the whole package. Three separate things are deliberately not counted:
+// is the whole package. Five separate things are deliberately not counted:
 //
 //   - A claim that has not been revalidated recently. A Bridge that said it had
 //     a file six months ago is telling you about the past.
@@ -10,10 +10,18 @@
 //     one disk array are one flood, one fire, one failed controller.
 //   - A Bridge that is offline. Its inventory is still known and the item is
 //     not missing, but it cannot serve, so it is not redundancy today.
+//   - The same Bridge counted twice. Inventory deltas, retries, and
+//     reconciliation can all put more than one record for one Bridge into an
+//     input set; aggregating by alias first stops that becoming redundancy.
+//   - A Bridge whose failure domain is unknown, as evidence of independence.
+//     Unknown ownership establishes that a copy exists; it proves nothing about
+//     whether two copies would survive the same event.
 //
-// Getting this wrong is worse than not measuring at all: a dashboard that says
+// Every one of those is a rule about which direction to be wrong in. Getting
+// this backwards is worse than not measuring at all: a dashboard that says
 // "resilient" about a single operator's three machines actively discourages the
-// replication that would make it true.
+// replication that would make it true. So where the evidence is ambiguous, the
+// answer is always the more pessimistic one.
 package preservation
 
 import (
@@ -110,6 +118,13 @@ type Rules struct {
 // long enough that a Bridge which is simply switched off for a holiday does not
 // drag its whole library into "stale", and short enough that a disk that failed
 // last month stops being counted as redundancy.
+//
+// Version 2 tightened how claims are counted rather than changing any threshold:
+// duplicate records for one Bridge are collapsed, unknown failure domains share
+// one conservative bucket instead of each counting as independent, and
+// future-dated verification timestamps are rejected. Figures computed under
+// version 1 are not comparable, because version 1 could report a higher
+// independent count from the same underlying claims.
 func DefaultRules() Rules {
 	return Rules{
 		Version:            "2",
