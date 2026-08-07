@@ -388,6 +388,13 @@ func jsonType(v any) string {
 	}
 }
 
+// IsHashField reports whether a field name looks like a content hash field,
+// using the same heuristic that populates Report.HashFields. Exported so other
+// packages building on a probed capability set (bridge/scan, for instance) can
+// recognise hash-bearing fields on a listing response without duplicating the
+// candidate list.
+func IsHashField(name string) bool { return isHashField(name) }
+
 // isHashField reports whether a field name looks like a content hash.
 func isHashField(name string) bool {
 	lower := strings.ToLower(name)

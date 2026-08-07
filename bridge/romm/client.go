@@ -137,6 +137,30 @@ func (c *Client) GetUnauthenticated(ctx context.Context, path string) (int, []by
 	return c.Get(ctx, path, nil)
 }
 
+// Stream performs an authenticated GET and returns the raw response body for
+// the caller to read and close, without buffering it.
+//
+// Separate from Get on purpose: Get's response cap exists to stop a probe
+// request being turned into a memory exhaustion, but that same cap would make
+// Get unusable for downloading ROM content, which is routinely far larger than
+// 8 MiB. The caller is responsible for closing the returned body and for
+// applying whatever size limit is appropriate to what it's downloading.
+func (c *Client) Stream(ctx context.Context, path string) (status int, body io.ReadCloser, contentLength int64, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
+	if err != nil {
+		return 0, nil, 0, fmt.Errorf("romm: building request for %s: %w", path, err)
+	}
+	if c.Token != "" && c.Scheme.Apply != nil {
+		c.Scheme.Apply(req, c.Token)
+	}
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return 0, nil, 0, fmt.Errorf("romm: requesting %s: %s", path, c.Redact(err.Error()))
+	}
+	return resp.StatusCode, resp.Body, resp.ContentLength, nil
+}
+
 // DetectAuthScheme finds which credential presentation the server accepts, by
 // making an authenticated request to probePath under each scheme in turn.
 //

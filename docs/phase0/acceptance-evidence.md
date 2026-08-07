@@ -57,6 +57,20 @@ Its archive and multi-file sections are confirmed against this codebase's own
 tests; its RomM ingestion section is explicitly marked as an assumption this
 codebase has built on but never observed, for the same reason as B1 below.
 
+A third deliverable in this group, "Prototype a normalized local inventory
+manifest from one RomM server," **is proven**, distinct from the read/write
+workflow itself. `bridge/scan` lists a RomM server's inventory, downloads each
+item, runs it through the four-identity analysis and reference classification,
+and assembles the result into items that `protocol.Manifest.Validate` accepts —
+end to end against a purpose-built test server serving real, analyzable
+cartridge fixtures, proven in
+`TestPhase0_ScanProducesANormalizedManifestFromARomMServer` and
+`TestPhase0_ScannedItemsAssembleIntoAPublishableManifest`. It never guesses a
+RomM path independently: every request is built from a `romm.Report`'s
+already-resolved capability paths, so the paths themselves carry exactly the
+same "assumption until probed" caveat as B1, in exactly one place
+(`bridge/romm/capability.go`), rather than a second, parallel guess.
+
 ### 2. Filesystem publication mode works only after explicit operator configuration, and its writable-mount trust boundary is documented
 
 **Proven.**
@@ -202,6 +216,8 @@ data map so the two cannot drift apart silently.
 | A mismatched ingestion never activates | `TestPhase0_MismatchedIngestionIsAReviewState` | Phase 6 |
 | A corrupted payload never reaches the library | `TestPhase0_CorruptedPayloadIsRejectedBeforeItReachesTheLibrary` | Phase 6 |
 | API-only mode's remaining blocker fails loudly rather than guessing | `TestPhase0_APIOnlyModeIsBlockedOnAnUnprobedUploadAPI` | Phase 0 |
+| A RomM listing scans into a manifest-ready set of items | `TestPhase0_ScanProducesANormalizedManifestFromARomMServer` | Phase 0 |
+| Scanned items assemble into a validated manifest | `TestPhase0_ScannedItemsAssembleIntoAPublishableManifest` | Phase 0, Phase 3 |
 
 ---
 

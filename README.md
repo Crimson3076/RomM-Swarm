@@ -34,6 +34,7 @@ Scope of Work §13.1 asks for `host`, `bridge`, `relay`, `web`, `protocol`, and
 | `preservation/` | Risk states, independent replica counting, coverage | 0 |
 | `auth/` | Rotating refresh credentials: grace-window recovery, reuse detection, transactional Bridge persistence | 0 |
 | `bridge/romm/` | The RomM API adapter boundary and the capability probe | 0 |
+| `bridge/scan/` | RomM listing, download, and analysis wired into a normalized local manifest | 0 |
 | `bridge/destination/` | Staging, same-filesystem preflight, atomic no-overwrite publication | 0 |
 | `bridge/publish/` | Per-Swarm sharing policies and filtered manifests | 0 |
 | `bridge/ingest/` | RomM ingestion reconciliation and the receiving-flow driver | 0 |
