@@ -44,7 +44,7 @@ Scope of Work §13.1 asks for `host`, `bridge`, `relay`, `web`, `protocol`, and
 | `cmd/` | `swarm-probe`, `swarm-verify`, `swarm-fixtures` | 0 |
 | `internal/` | Test doubles: synthesised ROM fixtures, a fake RomM server | 0 |
 | `docs/adr/` | An architecture decision record per Phase 0 gate | 0 |
-| `docs/phase0/` | Data map, retention schedule, threat model, evidence ledger | 0 |
+| `docs/phase0/` | Data map, privacy disclosure, retention schedule, threat model, filesystem-publication trust writeup, archive/ingestion behavior, evidence ledger | 0 |
 
 Phase 0 has **no dependencies outside the Go standard library**, so its evidence
 reproduces anywhere without a module proxy.

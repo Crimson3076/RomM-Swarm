@@ -8,7 +8,10 @@ learns inventories."* The Host is a sensitive map of holdings and activity even
 though it never stores a single ROM.
 
 This document lists, field by field, what the Network Host holds in plaintext.
-The windows are in [retention-schedule.md](retention-schedule.md).
+The windows are in [retention-schedule.md](retention-schedule.md). The
+plain-language version a member would actually read is
+[privacy-disclosure.md](privacy-disclosure.md) — that document is derived from
+this one and should never say more than this one supports.
 
 ---
 

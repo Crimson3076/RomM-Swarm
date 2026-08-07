@@ -89,6 +89,12 @@ its declaration is refused. Tested in `TestUnsafeArchiveEntriesAreIgnored` and
 *A crash mid-transfer leaves a partial or wrong file under its final name, and
 RomM indexes it.*
 
+This threat is about crash safety within filesystem publication mode, once it's
+enabled. For the broader question of what enabling the mode changes about your
+Bridge's trust footprint in the first place — a writable filesystem grant versus
+none at all — see
+[filesystem-publication-trust.md](filesystem-publication-trust.md).
+
 **Response.** The destination state machine, `protocol/destination.go`. Staging
 happens outside RomM's watched tree; verification happens before hand-off;
 publication is an atomic rename on the destination filesystem; a cross-filesystem

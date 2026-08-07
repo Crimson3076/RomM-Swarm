@@ -50,6 +50,13 @@ plausible implementation against a guessed protocol would produce code that look
 finished, passes tests against a fake built from the same guess, and fails
 against every real server.
 
+Two adjacent Phase 0 deliverables — "Document current multi-file, archive, and
+RomM ingestion behavior" — are addressed in
+[multi-file-archive-and-ingestion-behavior.md](multi-file-archive-and-ingestion-behavior.md).
+Its archive and multi-file sections are confirmed against this codebase's own
+tests; its RomM ingestion section is explicitly marked as an assumption this
+codebase has built on but never observed, for the same reason as B1 below.
+
 ### 2. Filesystem publication mode works only after explicit operator configuration, and its writable-mount trust boundary is documented
 
 **Proven.**
@@ -75,7 +82,12 @@ against every real server.
   none.
 - Publication cannot escape the scoped writable mount:
   `TestPublishRefusesDestinationsThatEscapeTheLibrary`.
-- The trust boundary is documented in the threat model (T5).
+- The trust boundary is documented dedicatedly in
+  [filesystem-publication-trust.md](filesystem-publication-trust.md), which
+  states what the software guarantees (scoped destination paths, no-overwrite,
+  crash safety) against what it cannot (the actual width of the mount you
+  configure, the deployment's own privilege separation), and cross-referenced
+  from the threat model (T5).
 
 On a platform where the filesystem device cannot be determined, filesystem
 publication is refused outright rather than attempted — the same-filesystem
@@ -143,6 +155,13 @@ codebase. No transfer code has been written, deliberately.
 | Collection profile | [0005](../adr/0005-default-collection-profile.md) | Proposed |
 | Plaintext fields and retention | [0006](../adr/0006-central-plaintext-and-retention.md), [data map](privacy-data-map.md), [schedule](retention-schedule.md) | Proposed |
 | Pilot legal posture | [0008](../adr/0008-pilot-legal-risk-acceptance.md) | **Open — needs a person, not a commit** |
+
+The Phase 0 deliverable list additionally names a **privacy disclosure** as
+distinct from the data map and retention schedule: the plain-language version
+a prospective member would actually read, as opposed to the engineering
+record of what's stored. That now exists as
+[privacy-disclosure.md](privacy-disclosure.md), explicitly derived from the
+data map so the two cannot drift apart silently.
 
 ### 8. Known blockers are documented with a workaround or explicitly deferred
 
