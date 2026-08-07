@@ -37,6 +37,7 @@ point.
 | [0011](0011-verification-identity-model.md) | Four-identity verification model | no | Accepted |
 | [0012](0012-relay-deployment.md) | Relay deployment separation | yes | Proposed |
 | [0013](0013-client-packaging.md) | Web frontend and management application packaging | no | Open |
+| [0014](0014-refresh-rotation-recovery.md) | Refresh rotation recovery | no | Accepted |
 
 ## Phase 0 gate coverage
 

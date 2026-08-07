@@ -32,8 +32,12 @@ Scope of Work §13.1 asks for `host`, `bridge`, `relay`, `web`, `protocol`, and
 | `verify/` | Format-aware canonicalization adapters and the four-identity model | 0 |
 | `reference/` | Reference catalogue import, collection profiles, classification | 0 |
 | `preservation/` | Risk states, independent replica counting, coverage | 0 |
+| `auth/` | Rotating refresh credentials: grace-window recovery, reuse detection, transactional Bridge persistence | 0 |
 | `bridge/romm/` | The RomM API adapter boundary and the capability probe | 0 |
-| `bridge/` | Local agent: scanning, manifests, sharing policies, transfers | 1 |
+| `bridge/destination/` | Staging, same-filesystem preflight, atomic no-overwrite publication | 0 |
+| `bridge/publish/` | Per-Swarm sharing policies and filtered manifests | 0 |
+| `bridge/ingest/` | RomM ingestion reconciliation and the receiving-flow driver | 0 |
+| `bridge/` | Local agent: scanning, transfers, policy configuration | 1 |
 | `host/` | Network Host: identity, invitations, index, grants | 2 |
 | `relay/` | Encrypted fallback transport | 6 |
 | `web/` | Member portal | 5 |
@@ -169,7 +173,7 @@ Scope of Work §4 is the source of truth for what is open.
 
 Accepted: the implementation stack (0001), canonical identifiers and
 Swarm-scoped aliases (0009), the event vocabulary (0010), the verification model
-(0011).
+(0011), refresh rotation recovery (0014).
 
 Still open, and blocking: the networking stack (0002), supported RomM versions
 (0003), and pilot legal risk acceptance (0008) — which needs a person, not a

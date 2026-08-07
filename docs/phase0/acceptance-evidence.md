@@ -39,23 +39,47 @@ The endpoints in `bridge/romm/capability.go` are **assumptions until this is
 done.** They are held as a data table with a self-correcting probe precisely
 because they are assumptions.
 
+Everything on this path *except the upload transport itself* is now built and
+tested: staging, verification while staged, disk-space validation, the ingestion
+polling loop with its timeout, and the full receiving flow driving the
+destination state machine. The upload is deliberately left as
+`ingest.UnprobedUploader`, which fails with an explanation
+(`TestPhase0_APIOnlyModeIsBlockedOnAnUnprobedUploadAPI`). RomM's upload endpoint,
+chunking scheme, and completion signal are not known to this codebase; writing a
+plausible implementation against a guessed protocol would produce code that looks
+finished, passes tests against a fake built from the same guess, and fails
+against every real server.
+
 ### 2. Filesystem publication mode works only after explicit operator configuration, and its writable-mount trust boundary is documented
 
-**Partly proven.**
+**Proven.**
 
 - The two destination modes are separate, exhaustive, and validated
   (`protocol.DestinationMode`, `TestHandOffStateRejectsUnknownMode`).
 - The state machine forbids reaching either destination branch without passing
   through `verified_in_staging` (`TestPhase0_RequiredDestinationPaths`,
   `TestTransitionRejectsUnknownAndIllegalMoves`).
-- The trust boundary is documented in the threat model (T5) and
-  [ADR 0007](../adr/0007-browser-delivery.md) records the related delivery
-  decision.
+- The preflight refuses unsafe configurations, naming what to change:
+  `TestPhase0_PreflightRefusesStagingInsideTheWatchedTree`,
+  `TestPreflightRefusesAPublishStagingDirectoryOnAnotherFilesystem`,
+  `TestContainmentChecksFollowSymlinks`.
+- Publication is atomic and never overwrites:
+  `TestPhase0_FilesystemPublicationIsAtomicAndNeverOverwrites`. It uses a hard
+  link rather than a rename, so no-overwrite is enforced by the operation itself
+  with no check-then-act window.
+- A crash leaves nothing partial under a final name, and abandoned staging is
+  collected: `TestPhase0_CrashLeavesNoPartialFileUnderTheFinalName`.
+- The cross-filesystem path is exercised **against a real device boundary**, not
+  a simulation: `TestPhase0_CrossFilesystemStagingIsDetectedAndHandled` locates a
+  genuinely different filesystem and skips with an explanation if the machine has
+  none.
+- Publication cannot escape the scoped writable mount:
+  `TestPublishRefusesDestinationsThatEscapeTheLibrary`.
+- The trust boundary is documented in the threat model (T5).
 
-**Outstanding:** the filesystem preflight itself — same-filesystem detection,
-atomic no-overwrite rename, `fsync` of the destination directory, crash recovery.
-That is Phase 1 and Phase 6 work and requires a disposable library to test
-against.
+On a platform where the filesystem device cannot be determined, filesystem
+publication is refused outright rather than attempted — the same-filesystem
+guarantee cannot be made there, and API-only mode remains available.
 
 ### 3. A manifest can distinguish exact files, regional or revision variants, and canonical games
 
@@ -142,6 +166,23 @@ codebase. No transfer code has been written, deliberately.
 | Offline is unavailable, not missing | `TestPhase0_OfflineIsUnavailableNotMissing` | Phase 4 |
 | Transfer acceptance requires SHA-256, not catalogue hashes | `TestPhase0_TransferAcceptanceRequiresStrongAgreement` | §3 |
 | The probe never records the credential | `TestPhase0_ProbeOutputNeverContainsTheCredential` | §7 |
+| Refresh rotation survives a crash at every step | `TestPhase0_RefreshRotationSurvivesACrashAtEveryStep` | Phase 0, Phase 2 |
+| Recovery is bound to the Bridge identity key | `TestPhase0_RecoveryIsBoundToTheBridgeIdentity` | Phase 2 |
+| Reuse outside the grace path revokes the family | `TestPhase0_ReuseOutsideTheGracePathRevokesTheFamily` | Phase 2 |
+| Owner re-enrolment is the only escape from revocation | `TestPhase0_OwnerReEnrolmentIsTheOnlyEscapeFromRevocation` | Phase 2 |
+| Filesystem publication is atomic and never overwrites | `TestPhase0_FilesystemPublicationIsAtomicAndNeverOverwrites` | Phase 6 |
+| A crash leaves nothing partial under a final name | `TestPhase0_CrashLeavesNoPartialFileUnderTheFinalName` | Phase 6 |
+| Cross-filesystem staging is detected and handled | `TestPhase0_CrossFilesystemStagingIsDetectedAndHandled` | Phase 6 |
+| Unsafe staging configurations are refused | `TestPhase0_PreflightRefusesStagingInsideTheWatchedTree` | Phase 1 |
+| Verification happens while staged, on SHA-256 | `TestPhase0_VerificationHappensWhileStaged` | Phase 6 |
+| One Bridge publishes different manifests without leaking | `TestPhase0_OneBridgePublishesDifferentManifestsWithoutLeaking` | Phase 1, Phase 3 |
+| Unverified content is never published under any policy | `TestPhase0_UnverifiedContentIsNeverPublished` | §3 |
+| Repeated scans produce no false additions or deletions | `TestPhase0_RepeatedScansProduceNoChange` | Phase 1 |
+| The full receiving flow reaches source_active only after RomM matches | `TestPhase0_FilesystemFlowReachesSourceActiveOnlyAfterRommMatches` | Phase 6 |
+| Ingestion timeout is a visible review state, not a source | `TestPhase0_IngestionTimeoutIsAVisibleReviewStateNotASource` | Phase 6 |
+| A mismatched ingestion never activates | `TestPhase0_MismatchedIngestionIsAReviewState` | Phase 6 |
+| A corrupted payload never reaches the library | `TestPhase0_CorruptedPayloadIsRejectedBeforeItReachesTheLibrary` | Phase 6 |
+| API-only mode's remaining blocker fails loudly rather than guessing | `TestPhase0_APIOnlyModeIsBlockedOnAnUnprobedUploadAPI` | Phase 0 |
 
 ---
 
@@ -153,7 +194,7 @@ codebase. No transfer code has been written, deliberately.
 | B2 | **Direct-plus-relay under CGNAT is unproven.** The Phase 0 go/stop gate. | None. It needs two hosts, one genuinely behind CGNAT. A simulated CGNAT is worth doing first but is not sufficient evidence — the failure modes that matter are carrier-specific. | [ADR 0002](../adr/0002-networking-stack.md). |
 | B3 | **No reference catalogues are committed.** No-Intro DATs are not redistributed here. | The importer is proven against synthesised catalogues with real hashes. | Obtain and lock the approved DATs for the five platforms; record versions in [ADR 0004](../adr/0004-initial-platforms.md). |
 | B4 | **Legal risk acceptance is not done.** | None, and none is appropriate. | [ADR 0008](../adr/0008-pilot-legal-risk-acceptance.md). |
-| B5 | **Filesystem publication preflight is unimplemented.** | The state machine forbids the unsafe transitions; the preflight itself needs a disposable library. | Phase 1 and Phase 6. |
+| B5 | **RomM's upload API shape is unknown**, so API-only import cannot be completed. Downstream of B1. | Everything else on the API-only path is built and tested; the upload is an interface whose only implementation fails with an explanation rather than guessing a protocol. | Closes with B1. |
 
 ---
 
