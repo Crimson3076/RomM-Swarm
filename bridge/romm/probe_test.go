@@ -190,6 +190,31 @@ func TestSamplesAreOmittedUnlessRequested(t *testing.T) {
 	}
 }
 
+// TestPhase0_EmptyLibraryIsNotMistakenForAMissingHashField guards against a
+// real bug: firstObject used to fall back to treating a listing envelope's
+// own pagination metadata ({"items": [], "total": 0}) as though it were a
+// ROM object when the library was simply empty, wrongly reporting "no hash
+// field was found" as a blocker for a server that has nothing uploaded yet
+// rather than one that genuinely lacks hashes. Caught by hand while wiring
+// swarm-bridge against a fresh test server with nothing in it.
+func TestPhase0_EmptyLibraryIsNotMistakenForAMissingHashField(t *testing.T) {
+	srv := fakeromm.New(fakeromm.Options{Token: testToken, EmptyROMs: true})
+	defer srv.Close()
+
+	rep := probeAgainst(t, srv, ProbeOptions{Token: testToken})
+
+	if len(rep.HashFields) != 0 {
+		t.Fatalf("hash fields were reported from an empty listing: %v", rep.HashFields)
+	}
+	joined := strings.Join(rep.Blockers, " ")
+	if strings.Contains(joined, "hash") {
+		t.Fatalf("an empty library was wrongly reported as missing a hash field: %v", rep.Blockers)
+	}
+	if len(rep.ROMFields) != 0 {
+		t.Fatalf("ROMFields was populated from an envelope with no items: %v", rep.ROMFields)
+	}
+}
+
 func TestServerWithoutHashesIsABlocker(t *testing.T) {
 	srv := fakeromm.New(fakeromm.Options{Token: testToken, NoHashes: true})
 	defer srv.Close()
@@ -251,6 +276,38 @@ func TestRedactionCoversEveryOccurrence(t *testing.T) {
 	}
 	if strings.Count(got, "[redacted]") != 2 {
 		t.Errorf("expected two redactions, got %q", got)
+	}
+}
+
+// TestFirstObjectDoesNotMistakeAnEmptyEnvelopeForAnObject exercises firstObject
+// directly against both shapes an empty listing can take — a JSON empty array
+// and a JSON null, which a nil Go slice marshals as — since the real bug this
+// guards was specific to the null shape (a nil slice fails the []any type
+// assertion an empty non-nil slice would pass, which is exactly what let it
+// slip through the first attempt at this fix).
+func TestFirstObjectDoesNotMistakeAnEmptyEnvelopeForAnObject(t *testing.T) {
+	cases := []string{
+		`{"items": [], "total": 0}`,
+		`{"items": null, "total": 0}`,
+		`{"results": [], "total": 0}`,
+	}
+	for _, body := range cases {
+		if obj := firstObject([]byte(body)); obj != nil {
+			t.Errorf("firstObject(%s) = %v, want nil", body, obj)
+		}
+	}
+
+	// A genuine single-object response (no recognised list key at all) is
+	// still returned as-is.
+	obj := firstObject([]byte(`{"id": 1, "name": "solo object"}`))
+	if obj == nil || obj["name"] != "solo object" {
+		t.Errorf("a genuine single-object response was not returned: %v", obj)
+	}
+
+	// A populated listing still yields its first item.
+	obj = firstObject([]byte(`{"items": [{"id": 1, "sha1_hash": "abc"}], "total": 1}`))
+	if obj == nil || obj["sha1_hash"] != "abc" {
+		t.Errorf("a populated listing did not yield its first item: %v", obj)
 	}
 }
 

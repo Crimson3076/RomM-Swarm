@@ -42,6 +42,11 @@ type Options struct {
 	// content cannot be matched against a catalogue.
 	NoHashes bool
 
+	// EmptyROMs makes the roms listing report zero items, to simulate a
+	// freshly installed server or an empty library — as opposed to NoHashes,
+	// which simulates a library that has content but no matchable hashes.
+	EmptyROMs bool
+
 	// SpecPath overrides where the specification is published.
 	SpecPath string
 
@@ -97,6 +102,10 @@ func New(opts Options) *Server {
 		if r.Method == http.MethodPost {
 			w.WriteHeader(http.StatusCreated)
 			writeJSON(w, map[string]any{"id": 99, "status": "accepted"})
+			return
+		}
+		if opts.EmptyROMs {
+			writeJSON(w, map[string]any{"items": []map[string]any{}, "total": 0, "limit": 1})
 			return
 		}
 		writeJSON(w, map[string]any{

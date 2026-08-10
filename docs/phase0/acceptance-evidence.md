@@ -333,6 +333,7 @@ data map so the two cannot drift apart silently.
 | The relay enforces its configured byte and concurrency limits | `TestPhase0_RelayEnforcesTheConfiguredByteLimit`, `TestPhase0_RelayEnforcesTheConfiguredConcurrencyLimit` | Phase 0 |
 | Revoking a grant tears down an already-active relayed session | `TestPhase0_RevokeTearsDownAnActiveSessionAndRejectsFutureOnes` | Phase 0 |
 | The relay's wire protocol has no field for any credential | `TestConnectFrameCarriesNoCredentialField` | §7 |
+| An empty RomM library is never mistaken for a missing hash field | `TestPhase0_EmptyLibraryIsNotMistakenForAMissingHashField`, `TestFirstObjectDoesNotMistakeAnEmptyEnvelopeForAnObject` | Phase 0 |
 
 ---
 

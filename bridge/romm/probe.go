@@ -359,11 +359,19 @@ func firstObject(body []byte) map[string]any {
 	if json.Unmarshal(body, &envelope) != nil {
 		return nil
 	}
+	sawListEnvelope := false
 	for _, key := range []string{"items", "results", "data", "roms", "platforms"} {
 		raw, ok := envelope[key]
 		if !ok {
 			continue
 		}
+		// The key being present at all — even holding JSON null, which a nil
+		// Go slice marshals as — is enough to mark this as a recognised
+		// listing envelope. Requiring a successful []any assertion here would
+		// miss the null case (a nil slice is not a []any once decoded) and
+		// fall through to misreading the envelope's own pagination metadata
+		// as a ROM object below.
+		sawListEnvelope = true
 		list, ok := raw.([]any)
 		if !ok || len(list) == 0 {
 			continue
@@ -371,6 +379,15 @@ func firstObject(body []byte) map[string]any {
 		if obj, ok := list[0].(map[string]any); ok {
 			return obj
 		}
+	}
+	// A recognised listing envelope with zero items — e.g. a fresh library —
+	// has nothing to inspect. Falling through to the "single object" case
+	// below would misread the envelope's own pagination metadata (limit,
+	// total, and so on) as a ROM object's fields, and then wrongly report
+	// "no hash field was found" as a blocker for a library that simply has
+	// nothing in it yet.
+	if sawListEnvelope {
+		return nil
 	}
 	// A single object response.
 	if len(envelope) > 0 {

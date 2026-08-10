@@ -43,7 +43,7 @@ Scope of Work §13.1 asks for `host`, `bridge`, `relay`, `web`, `protocol`, and
 | `host/` | Network Host: identity, invitations, index, grants | 2 |
 | `relay/` | Encrypted fallback transport: pairing, byte/time/concurrency/bandwidth limits, revocation | 0 |
 | `web/` | Member portal | 5 |
-| `cmd/` | `swarm-probe`, `swarm-verify`, `swarm-fixtures` | 0 |
+| `cmd/` | `swarm-probe`, `swarm-verify`, `swarm-fixtures`, `swarm-bridge` | 0 |
 | `internal/` | Test doubles: synthesised ROM fixtures, a fake RomM server | 0 |
 | `docs/adr/` | An architecture decision record per Phase 0 gate | 0 |
 | `docs/phase0/` | Data map, privacy disclosure, retention schedule, threat model, filesystem-publication trust writeup, archive/ingestion behavior, evidence ledger | 0 |
@@ -149,6 +149,26 @@ bytes — which is why the test suite carries no ROM data at all.
 ```sh
 swarm-fixtures -out /tmp/sample
 ```
+
+### `swarm-bridge` — exercise the pipeline against a real RomM server
+
+Not the Phase 1 Bridge — no persistent config, no Swarm, no second machine.
+Just the already-tested pieces (`bridge/scan`, `bridge/ingest`, `bridge/romm`)
+wired into two commands you can actually run:
+
+```sh
+export ROMM_URL=https://romm.example
+export ROMM_TOKEN=<Client API Token>
+
+swarm-bridge list gb                          # what RomM already has for a platform
+swarm-bridge upload gb ./game.gb              # stage, verify, upload, and wait for RomM to match it
+```
+
+`upload` runs the real receiving flow end to end — the same `ingest.Flow` Phase
+6 will drive, exercised for real here rather than only against fakes in tests.
+It writes to your real RomM library; there is nothing simulated once it
+starts. See the package doc in `cmd/swarm-bridge/main.go` for exactly what it
+does and does not prove.
 
 ---
 
