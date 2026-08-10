@@ -110,15 +110,27 @@ func Requirements() []Requirement {
 		},
 		{
 			ID:      "roms.upload",
-			Summary: "upload a ROM using a scoped standard-user token",
+			Summary: "start a chunked ROM upload session using a scoped standard-user token",
 			Needs: "Verify standard-user Client API Token behavior for roms.write upload without administrator access; " +
 				"prove API-only mode chunked upload to RomM",
 			Required: true,
 			Candidates: []Candidate{
+				// Confirmed against a live RomM 5.0.0 instance: upload is a
+				// chunked session, not a single-shot POST. The full sequence,
+				// implemented in bridge/ingest.RommUploader:
+				//   POST /api/roms/upload/start        four headers, returns upload_id
+				//   PUT  /api/roms/upload/{upload_id}   one call per chunk, x-chunk-index header, raw body
+				//   POST /api/roms/upload/{upload_id}/complete
+				//   POST /api/roms/upload/{upload_id}/cancel   on failure, best effort
+				// The three {upload_id} routes are not independently discoverable
+				// without a live session, so this single entry point stands for
+				// the whole subsystem.
+				{"POST", "/api/roms/upload/start"},
+				// Retained as fallback candidates for a RomM version that predates
+				// the chunked upload session API. Unconfirmed against any real
+				// server; kept only because they cost nothing to try.
 				{"POST", "/api/roms"},
 				{"PUT", "/api/roms"},
-				{"POST", "/api/roms/upload"},
-				{"POST", "/api/uploads"},
 			},
 		},
 		{

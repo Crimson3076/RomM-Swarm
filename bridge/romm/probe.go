@@ -103,6 +103,26 @@ type Report struct {
 	Blockers []string `json:"blockers,omitempty"`
 }
 
+// Capability finds a resolved, found capability by id, or explains why it
+// can't be used.
+//
+// This is the single lookup every package built on a probed Report shares
+// (bridge/scan, bridge/ingest) — so that "the probe didn't resolve this path"
+// and "this id isn't in the capability table at all" are diagnosed identically
+// everywhere, rather than each caller inventing its own wording.
+func (r *Report) Capability(id string) (CapabilityResult, error) {
+	for _, c := range r.Capabilities {
+		if c.ID == id {
+			if !c.Found {
+				return CapabilityResult{}, fmt.Errorf(
+					"romm: the capability probe did not resolve %q on this server; run swarm-probe and check path_inventory", id)
+			}
+			return c, nil
+		}
+	}
+	return CapabilityResult{}, fmt.Errorf("romm: %q is not in the probed capability set", id)
+}
+
 // hashFieldCandidates are the field names that carry content hashes across RomM
 // versions. Matching by suffix as well as by exact name, because the prefix
 // convention has changed between releases.
@@ -396,8 +416,19 @@ func jsonType(v any) string {
 func IsHashField(name string) bool { return isHashField(name) }
 
 // isHashField reports whether a field name looks like a content hash.
+//
+// The "_hash" suffix rule is not a guess: a probe against a live RomM 5.0.0
+// instance found crc_hash, md5_hash, sha1_hash, and ra_hash (a
+// RetroAchievements-specific hash, distinct from the other three) all
+// following that convention. ra_hash is not in hashFieldCandidates by name —
+// RomM may add further algorithm-prefixed hash fields the same way — so the
+// suffix is matched generically rather than enumerating every prefix RomM
+// happens to use today.
 func isHashField(name string) bool {
 	lower := strings.ToLower(name)
+	if strings.HasSuffix(lower, "_hash") {
+		return true
+	}
 	for _, c := range hashFieldCandidates {
 		if lower == c || strings.HasSuffix(lower, "_"+c) {
 			return true

@@ -26,7 +26,7 @@ point.
 |---|---|---|---|
 | [0001](0001-implementation-stack.md) | Implementation stack | yes | Accepted |
 | [0002](0002-networking-stack.md) | Direct transport and encrypted relay fallback | yes | Open |
-| [0003](0003-supported-romm-versions.md) | Supported RomM versions | yes | Open |
+| [0003](0003-supported-romm-versions.md) | Supported RomM versions | yes | Accepted (standard-user verification still open) |
 | [0004](0004-initial-platforms.md) | Initial platform set | yes | Proposed |
 | [0005](0005-default-collection-profile.md) | Default collection profile | yes | Proposed |
 | [0006](0006-central-plaintext-and-retention.md) | Central plaintext fields and retention | yes | Proposed |

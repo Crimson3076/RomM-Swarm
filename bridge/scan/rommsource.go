@@ -45,24 +45,9 @@ func (s *RommSource) maxDownload() int64 {
 	return DefaultMaxDownloadBytes
 }
 
-// capability finds a resolved, found capability by id, or explains why it
-// can't be used.
-func (s *RommSource) capability(id string) (romm.CapabilityResult, error) {
-	for _, c := range s.Report.Capabilities {
-		if c.ID == id {
-			if !c.Found {
-				return romm.CapabilityResult{}, fmt.Errorf(
-					"scan: the capability probe did not resolve %q on this server; run swarm-probe and check path_inventory", id)
-			}
-			return c, nil
-		}
-	}
-	return romm.CapabilityResult{}, fmt.Errorf("scan: %q is not in the probed capability set", id)
-}
-
 // ListROMs implements Source.
 func (s *RommSource) ListROMs(ctx context.Context, page Page) ([]ROMRecord, bool, error) {
-	cap, err := s.capability("roms.list")
+	cap, err := s.Report.Capability("roms.list")
 	if err != nil {
 		return nil, false, err
 	}
@@ -103,7 +88,7 @@ func (s *RommSource) ListROMs(ctx context.Context, page Page) ([]ROMRecord, bool
 
 // Download implements Source.
 func (s *RommSource) Download(ctx context.Context, rec ROMRecord) (io.ReadCloser, int64, error) {
-	cap, err := s.capability("roms.download")
+	cap, err := s.Report.Capability("roms.download")
 	if err != nil {
 		return nil, 0, err
 	}

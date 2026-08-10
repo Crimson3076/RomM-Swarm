@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -53,8 +54,13 @@ type Transition struct {
 // supported chunked upload API using the local scoped standard-user token" and
 // "Let RomM control its own assembly, publication, indexing, and matching
 // process. The Bridge does not write into the RomM library."
+//
+// filename is what the uploaded item should be called — RomM's chunked upload
+// session requires a name up front, and Expected carries no filename of its
+// own (a verified identity is not a name). Callers pass the same value they
+// would give a filesystem-mode publish.
 type Uploader interface {
-	Upload(ctx context.Context, stagedPath string, expected Expected) error
+	Upload(ctx context.Context, stagedPath, filename string, expected Expected) error
 }
 
 // ErrUploadUnprobed is returned by UnprobedUploader.
@@ -77,7 +83,7 @@ var ErrUploadUnprobed = errors.New(
 type UnprobedUploader struct{}
 
 // Upload implements Uploader.
-func (UnprobedUploader) Upload(context.Context, string, Expected) error {
+func (UnprobedUploader) Upload(context.Context, string, string, Expected) error {
 	return fmt.Errorf("%w: run swarm-probe against a RomM instance and record its upload operation (see ADR 0003)",
 		ErrUploadUnprobed)
 }
@@ -202,7 +208,7 @@ func (f *Flow) Receive(
 		if err := f.advance(id, handOff, "handing the verified payload to RomM's upload API"); err != nil {
 			return "", err
 		}
-		if err := f.Uploader.Upload(ctx, f.Staging.PathFor(id), expected); err != nil {
+		if err := f.Uploader.Upload(ctx, f.Staging.PathFor(id), filepath.Base(relativeDest), expected); err != nil {
 			// The upload failed. The payload is still staged and still verified,
 			// so this is not a verification conflict — but the transfer cannot
 			// proceed, and the state machine has no path back from

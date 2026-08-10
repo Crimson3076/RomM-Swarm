@@ -67,12 +67,16 @@ concrete differences:
    software cannot make for you.
 
 4. **RomM's own scanning is now reading files a second, independent writer
-   put there.** In API-only mode, RomM's upload API is the only thing that
-   ever adds content, so RomM's assumptions about how its own library gets
-   populated hold. In filesystem publication mode, the Bridge is a second
-   writer working around that API, and RomM has to discover the new file
-   through its normal library scan rather than being told about it directly.
-   This is why the ingestion-reconciliation wait exists at all — see
+   put there — though this matters less than it first appears to.** Evidence
+   from a live RomM 5.0.0 instance (see
+   [ADR 0003](../adr/0003-supported-romm-versions.md)) showed that even the
+   upload API doesn't hand a file to RomM's indexer directly: it writes the
+   assembled file into the library directory and then RomM's own filesystem
+   watcher discovers it, debounced by five minutes, exactly as it would
+   discover a file placed there by any other means. API-only and filesystem
+   publication converge on the same discovery path; the difference is only
+   *who* wrote the file, not how RomM notices it. This is why the
+   ingestion-reconciliation wait exists for both modes — see
    [acceptance-evidence.md](acceptance-evidence.md) criterion 1 and
    `bridge/ingest` — and why a file on disk is never treated as a Swarm
    source before RomM confirms it found and matched it.
@@ -112,13 +116,16 @@ concrete differences:
   that exposure, but it doesn't reduce it either. Least-privilege deployment
   is the operator's responsibility; the software can only be conservative
   with the access it's actually given.
-- **That RomM's own scan behavior is well understood.** The reconciliation
-  wait in `bridge/ingest` assumes RomM will, eventually, notice a new file
-  and index it correctly. That assumption is unconfirmed against a real RomM
-  instance — see [ADR 0003](../adr/0003-supported-romm-versions.md) — and
-  filesystem publication depends on it more directly than API-only mode
-  does, because API-only mode hands the file to RomM directly instead of
-  waiting for RomM to find it on its own.
+- **That RomM's own scan behavior is fully characterized across every
+  deployment.** The core mechanism is now confirmed against a live RomM
+  5.0.0 instance — filesystem watcher, five-minute rescan debounce, same
+  discovery path for both modes — see
+  [ADR 0003](../adr/0003-supported-romm-versions.md) and
+  [multi-file-archive-and-ingestion-behavior.md](multi-file-archive-and-ingestion-behavior.md).
+  What's still unconfirmed is whether that debounce is a fixed constant or
+  configurable per instance; a much longer debounce on some deployment would
+  affect filesystem publication and API-only ingestion equally, since both
+  now wait on the same watcher.
 
 ## Recommendation
 

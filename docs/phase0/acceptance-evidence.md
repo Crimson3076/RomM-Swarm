@@ -22,54 +22,73 @@ holding.
 
 ### 1. A scoped standard RomM user can complete the API-only read, download, upload, and ingestion workflow without administrator rights
 
-**Not proven. Blocked on live-server access.**
+**Mostly proven, against a real server. One specific gap remains: the token
+used was an admin token, not a standard user's.**
 
-The capability probe that answers this is built and tested
-(`bridge/romm`, `TestPhase0_ProbeConfirmsRequiredCapabilities`), and the
-capability table names the Phase 0 deliverable behind each requirement. It has
-not been run against a real RomM instance: the session that wrote it had outbound
-access to the target server denied by network egress policy.
+A live RomM 5.0.0 instance was probed and then driven through a real,
+end-to-end upload — start, chunk, complete — with the server's own logs read
+before and after to confirm what actually happened. Full account in
+[ADR 0003](../adr/0003-supported-romm-versions.md). What that closed:
 
-**To close:** run `make probe` against the instance with a scoped standard-user
-token, commit the bundle under `fixtures/`, correct any capability whose
-candidate paths did not match, and set [ADR 0003](../adr/0003-supported-romm-versions.md)
-to Accepted.
+- The capability table's paths are confirmed correct for platforms, listing,
+  detail, download, identity, and server version — matched on the first probe
+  run. `roms.upload` did not match any of the four guessed candidates; the real
+  shape (a chunked session: `POST .../upload/start`, `PUT .../upload/{id}`,
+  `POST .../upload/{id}/complete`, `POST .../upload/{id}/cancel`) is now in
+  `capability.go`, confirmed rather than guessed.
+- `bridge/ingest.RommUploader` replaces `UnprobedUploader` and implements that
+  confirmed sequence for real: platform-slug resolution to RomM's numeric id
+  (`bridge/romm.FetchPlatforms`, `TestPhase0_PlatformLookupMatchesConfirmedRomMShape`),
+  chunked upload with correct reassembly
+  (`TestPhase0_RommUploaderMatchesConfirmedRomMBehavior`,
+  `TestPhase0_MultiChunkUploadReassemblesInOrder`), and cleanup on failure
+  (`TestPhase0_ChunkFailureCancelsTheSession`). Two details the OpenAPI schema
+  alone could not answer — the response field naming the upload session
+  (`upload_id`), and whether a chunk is a raw byte stream (it is) — were
+  resolved by observing one real upload, not guessed a second time.
+- Hash field detection was broadened from an enumerated prefix list to a
+  generic `*_hash` suffix match, directly on evidence: a real ROM object
+  carried `crc_hash`, `md5_hash`, `sha1_hash`, and a fourth,
+  RetroAchievements-specific `ra_hash` this project hadn't accounted for.
+- The staging, verification, disk-space validation, and destination
+  state-machine driving were already built and tested before this round; see
+  the properties table below for their specific tests.
 
-The endpoints in `bridge/romm/capability.go` are **assumptions until this is
-done.** They are held as a data table with a self-correcting probe precisely
-because they are assumptions.
+**What's still open:**
 
-Everything on this path *except the upload transport itself* is now built and
-tested: staging, verification while staged, disk-space validation, the ingestion
-polling loop with its timeout, and the full receiving flow driving the
-destination state machine. The upload is deliberately left as
-`ingest.UnprobedUploader`, which fails with an explanation
-(`TestPhase0_APIOnlyModeIsBlockedOnAnUnprobedUploadAPI`). RomM's upload endpoint,
-chunking scheme, and completion signal are not known to this codebase; writing a
-plausible implementation against a guessed protocol would produce code that looks
-finished, passes tests against a fake built from the same guess, and fails
-against every real server.
+- **Standard-user verification specifically.** The token used throughout
+  carried `"role": "admin"`. Everything above proves the mechanism works; it
+  does not yet prove a correctly-scoped *non-admin* token can do the same
+  things, which is what this criterion actually asks. Closing this needs one
+  more short probe run against a standard-role account.
+- **The observe/reconciliation side against real RomM is not yet built.**
+  `bridge/ingest.RommUploader` (the write side) is real; a corresponding
+  `Library` implementation (the read side `Reconciler` polls) is not — it's
+  still only exercised in tests against `fakeLibrary`. The confirmed response
+  shapes make this a well-specified follow-on rather than an open question, but
+  it wasn't built in this pass. See
+  [multi-file-archive-and-ingestion-behavior.md](multi-file-archive-and-ingestion-behavior.md)
+  for exactly what a real implementation needs and why it should re-verify by
+  download rather than trust RomM's self-reported hash.
 
 Two adjacent Phase 0 deliverables — "Document current multi-file, archive, and
 RomM ingestion behavior" — are addressed in
 [multi-file-archive-and-ingestion-behavior.md](multi-file-archive-and-ingestion-behavior.md).
-Its archive and multi-file sections are confirmed against this codebase's own
-tests; its RomM ingestion section is explicitly marked as an assumption this
-codebase has built on but never observed, for the same reason as B1 below.
+Its archive and multi-file sections were already confirmed against this
+codebase's own tests; its RomM ingestion section has now moved substantially
+from assumed to confirmed, with what remains assumed named explicitly.
 
 A third deliverable in this group, "Prototype a normalized local inventory
 manifest from one RomM server," **is proven**, distinct from the read/write
 workflow itself. `bridge/scan` lists a RomM server's inventory, downloads each
 item, runs it through the four-identity analysis and reference classification,
 and assembles the result into items that `protocol.Manifest.Validate` accepts —
-end to end against a purpose-built test server serving real, analyzable
-cartridge fixtures, proven in
-`TestPhase0_ScanProducesANormalizedManifestFromARomMServer` and
-`TestPhase0_ScannedItemsAssembleIntoAPublishableManifest`. It never guesses a
-RomM path independently: every request is built from a `romm.Report`'s
-already-resolved capability paths, so the paths themselves carry exactly the
-same "assumption until probed" caveat as B1, in exactly one place
-(`bridge/romm/capability.go`), rather than a second, parallel guess.
+originally proven against a purpose-built test server serving real, analyzable
+cartridge fixtures (`TestPhase0_ScanProducesANormalizedManifestFromARomMServer`,
+`TestPhase0_ScannedItemsAssembleIntoAPublishableManifest`), and its field-name
+assumptions (`platform_slug`, `fs_name`, `fs_size_bytes`, `id`) were
+subsequently confirmed to match the real server exactly, with no changes
+needed.
 
 ### 2. Filesystem publication mode works only after explicit operator configuration, and its writable-mount trust boundary is documented
 
@@ -218,6 +237,12 @@ data map so the two cannot drift apart silently.
 | API-only mode's remaining blocker fails loudly rather than guessing | `TestPhase0_APIOnlyModeIsBlockedOnAnUnprobedUploadAPI` | Phase 0 |
 | A RomM listing scans into a manifest-ready set of items | `TestPhase0_ScanProducesANormalizedManifestFromARomMServer` | Phase 0 |
 | Scanned items assemble into a validated manifest | `TestPhase0_ScannedItemsAssembleIntoAPublishableManifest` | Phase 0, Phase 3 |
+| A chunked upload matches confirmed real RomM behaviour end to end | `TestPhase0_RommUploaderMatchesConfirmedRomMBehavior` | Phase 0, Phase 6 |
+| Multi-chunk uploads reassemble in order across a non-round boundary | `TestPhase0_MultiChunkUploadReassemblesInOrder` | Phase 6 |
+| A failed chunk cancels the server-side session rather than abandoning it | `TestPhase0_ChunkFailureCancelsTheSession` | §7 |
+| A platform lookup matches the confirmed real RomM object shape | `TestPhase0_PlatformLookupMatchesConfirmedRomMShape` | Phase 0 |
+| Duplicate platform slugs resolve deterministically | `TestPhase0_DuplicateSlugsResolveToTheFirstEntry` | Phase 0 |
+| A malformed platform row is skipped, not fatal to the whole fetch | `TestPhase0_MalformedPlatformRowsAreSkipped` | Phase 0 |
 
 ---
 
@@ -225,11 +250,12 @@ data map so the two cannot drift apart silently.
 
 | # | Blocker | Workaround | Deferred to |
 |---|---|---|---|
-| B1 | **No live RomM instance was reachable.** The build environment's network egress policy denied the CONNECT to the target server (the proxy answered 403), so no request was ever sent. | The probe is built and tested against a fake server. RomM's real paths are held as a correctable data table, and the probe reports every path the real server documents so a mismatch is one line to fix. | Run `make probe` from an environment that can reach the server. |
+| ~~B1~~ | ~~No live RomM instance was reachable from this codebase's own environment.~~ **Resolved by the project owner running the probe and a sequence of manual requests directly, reporting the results back for interpretation.** The environment's own egress policy is unchanged and still denies the connection; the workaround was procedural, not technical. | — | Closed. See [ADR 0003](../adr/0003-supported-romm-versions.md). |
 | B2 | **Direct-plus-relay under CGNAT is unproven.** The Phase 0 go/stop gate. | None. It needs two hosts, one genuinely behind CGNAT. A simulated CGNAT is worth doing first but is not sufficient evidence — the failure modes that matter are carrier-specific. | [ADR 0002](../adr/0002-networking-stack.md). |
 | B3 | **No reference catalogues are committed.** No-Intro DATs are not redistributed here. | The importer is proven against synthesised catalogues with real hashes. | Obtain and lock the approved DATs for the five platforms; record versions in [ADR 0004](../adr/0004-initial-platforms.md). |
 | B4 | **Legal risk acceptance is not done.** | None, and none is appropriate. | [ADR 0008](../adr/0008-pilot-legal-risk-acceptance.md). |
-| B5 | **RomM's upload API shape is unknown**, so API-only import cannot be completed. Downstream of B1. | Everything else on the API-only path is built and tested; the upload is an interface whose only implementation fails with an explanation rather than guessing a protocol. | Closes with B1. |
+| B5 | **Standard-user (non-admin) token behaviour is unverified.** Narrowed from "RomM's upload API shape is unknown" now that the shape is confirmed and implemented — the residual gap is specifically that every confirmation used a token with `"role": "admin"`. | The mechanism is proven and tested against the confirmed real protocol; what's missing is confirmation that a correctly-scoped standard-role token can do the same things. | One more short probe run against a non-admin account. See ADR 0003. |
+| B6 | **A production `Library` implementation for ingestion reconciliation against real RomM is not built.** `bridge/ingest.RommUploader` (write) is real; the corresponding read-side implementation of the `Library` interface `Reconciler` polls is still only exercised against `fakeLibrary` in tests. | The confirmed response shapes (platform_slug, hash fields, `is_identified`) make this well-specified rather than blocked. | Build `bridge/ingest`'s RomM-backed `Library`, re-verifying by download rather than trusting RomM's self-reported hash. See multi-file-archive-and-ingestion-behavior.md. |
 
 ---
 
@@ -241,11 +267,14 @@ MVP platforms have been proven."*
 
 | Condition | Status |
 |---|---|
-| API-only import proven | **No** — B1 |
+| API-only import proven | **Substantially — not fully.** Every capability path and the full chunked-upload protocol are confirmed against a real server and implemented as tested code. Two narrow gaps keep this from a plain "yes": the confirming token was an admin account, not a standard user (B5), and there is no production ingestion-reconciliation `Library` yet, only a tested stub (B6). |
 | A viable CGNAT connectivity path | **No** — B2 |
 | Verification for the MVP platforms | **Yes** |
 
-**One of three. Phase 1 must not begin.** The verification model, the protocol
-types, the identifier and alias model, the preservation metrics, and the probe
-are all in place and tested; the two remaining conditions both need access this
-codebase cannot grant itself.
+**Still not all three. Phase 1 must not begin.** The gap on API-only import has
+narrowed from "the endpoints are an unconfirmed guess" to two specific,
+well-scoped follow-ups (B5, B6). The verification model, the protocol types,
+the identifier and alias model, the preservation metrics, and the probe are all
+in place and tested; the CGNAT condition alone is enough to keep this at
+go/stop regardless, and closing it needs hardware this codebase cannot grant
+itself.
