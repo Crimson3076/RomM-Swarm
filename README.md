@@ -38,9 +38,10 @@ Scope of Work §13.1 asks for `host`, `bridge`, `relay`, `web`, `protocol`, and
 | `bridge/destination/` | Staging, same-filesystem preflight, atomic no-overwrite publication | 0 |
 | `bridge/publish/` | Per-Swarm sharing policies and filtered manifests | 0 |
 | `bridge/ingest/` | RomM ingestion reconciliation and the receiving-flow driver | 0 |
+| `bridge/transport/` | Direct-first, relay-fallback connectivity: routing, resume, mid-transfer route switching | 0 |
 | `bridge/` | Local agent: scanning, transfers, policy configuration | 1 |
 | `host/` | Network Host: identity, invitations, index, grants | 2 |
-| `relay/` | Encrypted fallback transport | 6 |
+| `relay/` | Encrypted fallback transport: pairing, byte/time/concurrency/bandwidth limits, revocation | 0 |
 | `web/` | Member portal | 5 |
 | `cmd/` | `swarm-probe`, `swarm-verify`, `swarm-fixtures` | 0 |
 | `internal/` | Test doubles: synthesised ROM fixtures, a fake RomM server | 0 |

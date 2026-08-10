@@ -205,16 +205,56 @@ machine.
 
 ### 5. Two home-lab Bridges can connect directly when possible and fall back to an encrypted relay without inbound port forwarding
 
-**Not proven. Requires hardware.**
+**The connectivity decision logic is proven; the hardware proof is not, and
+cannot be from this codebase.**
 
-[ADR 0002](../adr/0002-networking-stack.md) is Open and records the evaluation
-criteria, the candidates, and what a proof must demonstrate. **This is the
-go/stop gate most likely to stop the project**, and it cannot be closed from a
-codebase. No transfer code has been written, deliberately.
+[ADR 0002](../adr/0002-networking-stack.md) is now decided: a purpose-built
+transport over QUIC with hole punching and a custom relay. `relay/` and
+`bridge/transport/` implement and test the *decision logic* the criteria
+actually describe — direct-first, encrypted-relay fallback, resume, route
+switching, grant binding — against real network connections (loopback TCP):
+
+- Direct succeeds when reachable: `TestPhase0_DirectSucceedsWhenReachable`.
+- Falls back to relay when it isn't (an unreachable direct address, standing
+  in for a CGNAT rejection): `TestPhase0_FallsBackToRelayWhenDirectIsUnreachable`.
+- Neither side opens an inbound port for the relay path — both dial out to it.
+- The relay is a separate module (`relay/`, no Host imports), enforces byte,
+  time, and concurrency limits, is revocable, and its entire wire protocol
+  has no field for a credential of any kind
+  (`TestConnectFrameCarriesNoCredentialField`) — see ADR 0002's evaluation
+  table for the full mapping to each criterion.
+
+**What this does not prove:** real UDP hole punching, the actual QUIC wire
+protocol (deferred — see ADR 0002), and above all, behavior under a genuine
+carrier-grade NAT. A refused TCP loopback connection exercises the same
+fallback *code path* a real CGNAT rejection would, but a real CGNAT's UDP
+behaviour cannot be inferred from that — the failure modes that matter are
+carrier-specific, which is exactly why ADR 0002 has always said this needs
+two real hosts, one genuinely behind CGNAT. **This remains the go/stop gate
+most likely to stop the project**, now for a narrower and more concrete
+reason: not "no code exists," but "the code that exists has not been proven
+against the one thing that was always going to require hardware."
 
 ### 6. A relayed, interrupted transfer resumes and remains bound to its grant and Bridge identities
 
-**Not proven.** Blocked on the same gate.
+**Proven, against real network connections, not yet against real hardware.**
+
+- Resume after an interruption on the relay path:
+  `TestPhase0_RelayResumesFromItsOwnRecordedOffsetNotTheClients` — a second
+  session for the same grant resumes from the relay's own recorded byte
+  count, which is authoritative over whatever the reconnecting client claims
+  (protecting against a client understating its own progress to evade the
+  byte budget).
+- Grant binding across a route switch, specifically:
+  `TestPhase0_RouteSwitchMidTransferDoesNotLoseOrDuplicateBytes` — a transfer
+  starts direct, the direct connection dies mid-flight, and it finishes over
+  the relay under the *same* `GrantID` and `BridgeID` pair, with the full
+  payload arriving exactly once, in order. This test caught a real bug during
+  development (trusting the relay's authoritative offset unconditionally,
+  which is wrong on a fresh route switch since the relay has never seen a
+  grant that moved entirely over direct until that point) — see ADR 0002 for
+  the fix and the reasoning, since it's a genuine correctness property, not
+  just something that happened to make a test pass.
 
 ### 7. The project has written decisions for the initial technology stack, supported RomM versions, initial platforms, collection profile, plaintext fields, retention, and pilot legal posture
 
@@ -286,6 +326,13 @@ data map so the two cannot drift apart silently.
 | The observe side independently re-verifies rather than trusting RomM's hash | `TestPhase0_RommLibraryIndependentlyVerifiesRatherThanTrustingRomMsHashes` | Phase 0, Phase 6 |
 | A candidate is located by filename across multiple listing pages | `TestPhase0_RommLibraryLocatesByFilenameAcrossPages` | Phase 0 |
 | Reconciler and the real observe-side Library work together end to end | `TestPhase0_ReconcilerMatchesAgainstARealRommLibrary` | Phase 0, Phase 6 |
+| A direct path is used when the peer is reachable | `TestPhase0_DirectSucceedsWhenReachable` | Phase 0 |
+| An unreachable direct peer falls back to the encrypted relay | `TestPhase0_FallsBackToRelayWhenDirectIsUnreachable` | Phase 0 |
+| A route switch mid-transfer loses or duplicates no bytes | `TestPhase0_RouteSwitchMidTransferDoesNotLoseOrDuplicateBytes` | Phase 0 |
+| A relayed session resumes from the relay's own recorded offset | `TestPhase0_RelayResumesFromItsOwnRecordedOffsetNotTheClients` | Phase 0 |
+| The relay enforces its configured byte and concurrency limits | `TestPhase0_RelayEnforcesTheConfiguredByteLimit`, `TestPhase0_RelayEnforcesTheConfiguredConcurrencyLimit` | Phase 0 |
+| Revoking a grant tears down an already-active relayed session | `TestPhase0_RevokeTearsDownAnActiveSessionAndRejectsFutureOnes` | Phase 0 |
+| The relay's wire protocol has no field for any credential | `TestConnectFrameCarriesNoCredentialField` | §7 |
 
 ---
 
@@ -294,7 +341,7 @@ data map so the two cannot drift apart silently.
 | # | Blocker | Workaround | Deferred to |
 |---|---|---|---|
 | ~~B1~~ | ~~No live RomM instance was reachable from this codebase's own environment.~~ **Resolved by the project owner running the probe and a sequence of manual requests directly, reporting the results back for interpretation.** The environment's own egress policy is unchanged and still denies the connection; the workaround was procedural, not technical. | — | Closed. See [ADR 0003](../adr/0003-supported-romm-versions.md). |
-| B2 | **Direct-plus-relay under CGNAT is unproven.** The Phase 0 go/stop gate. | None. It needs two hosts, one genuinely behind CGNAT. A simulated CGNAT is worth doing first but is not sufficient evidence — the failure modes that matter are carrier-specific. | [ADR 0002](../adr/0002-networking-stack.md). |
+| B2 | **Direct-plus-relay under real CGNAT is unproven.** Narrowed from "no candidate chosen and no code written" — ADR 0002 is now decided (custom QUIC with hole punching) and the connectivity decision logic (`relay/`, `bridge/transport/`) is built and tested against real network connections. The Phase 0 go/stop gate itself is unchanged: it was always specifically the hardware proof, not the code. | None. It needs two hosts, one genuinely behind CGNAT. A simulated CGNAT (an unreachable direct address, already exercised in tests) is worth doing first but is not sufficient evidence — the failure modes that matter are carrier-specific, especially for UDP. | [ADR 0002](../adr/0002-networking-stack.md). |
 | B3 | **No reference catalogues are committed.** No-Intro DATs are not redistributed here. | The importer is proven against synthesised catalogues with real hashes. | Obtain and lock the approved DATs for the five platforms; record versions in [ADR 0004](../adr/0004-initial-platforms.md). |
 | B4 | **Legal risk acceptance is not done.** | None, and none is appropriate. | [ADR 0008](../adr/0008-pilot-legal-risk-acceptance.md). |
 | ~~B5~~ | ~~Standard-user (non-admin) token behaviour is unverified.~~ **Resolved: verified and it's a hard scope boundary, not a gap.** A real `"role": "user"` token reads exactly like admin but gets `403 Forbidden` on `roms.upload` — RomM's default user role has `roms.read` but not `roms.write`. Does not widen the threat model: a Bridge only ever writes to its own owner's instance, so the practical guidance is that operator issues their own Bridge an admin token for their own server — a credential they already effectively hold as that server's admin. | An operator's Bridge uses an admin-scoped Client API Token for their own RomM instance. | Closed as a finding. See ADR 0003. Low-priority follow-up on least-privilege hygiene — B7. |
@@ -312,14 +359,17 @@ MVP platforms have been proven."*
 | Condition | Status |
 |---|---|
 | API-only import proven | **Yes.** Every capability path and the full chunked-upload protocol are confirmed against a real server and implemented as tested code, for both admin and standard-user tokens. Standard-user upload is confirmed scope-blocked by RomM itself (`roms.write` isn't in the default `user` role); that resolves to "an operator uses an admin token for their own instance," which doesn't widen the threat model — see B5. The observe side (`bridge/ingest.RommLibrary`) is now real and tested too — see B6, closed. |
-| A viable CGNAT connectivity path | **No** — B2 |
+| A viable CGNAT connectivity path | **No, still — but the reason narrowed.** B2. The routing, resume, and route-switch decision logic is now built and tested (`relay/`, `bridge/transport/`); what's missing is specifically the hardware proof against a real carrier-grade NAT, which this codebase cannot supply. |
 | Verification for the MVP platforms | **Yes** |
 
-**Still not all three. Phase 1 must not begin.** API-only import is now fully
+**Still not all three. Phase 1 must not begin.** API-only import is fully
 proven — both the write side (`RommUploader`) and the observe side
 (`RommLibrary`) are real, tested code against RomM's confirmed protocol, for
 both admin and standard-user tokens. The verification model, the protocol
-types, the identifier and alias model, the preservation metrics, and the
-probe are all in place and tested. The remaining gate is entirely B2: a
-viable CGNAT connectivity path, which needs hardware this codebase cannot
-grant itself.
+types, the identifier and alias model, the preservation metrics, the probe,
+and now the connectivity decision logic (ADR 0002, `relay/`,
+`bridge/transport/`) are all in place and tested. The remaining gate is
+entirely B2, and entirely the hardware half of it: everything code could
+prove about direct-plus-relay connectivity without two real hosts, one behind
+genuine CGNAT, has now been proven. That specific proof needs hardware this
+codebase cannot grant itself.

@@ -25,7 +25,7 @@ point.
 | # | Title | Phase 0 gate | Status |
 |---|---|---|---|
 | [0001](0001-implementation-stack.md) | Implementation stack | yes | Accepted |
-| [0002](0002-networking-stack.md) | Direct transport and encrypted relay fallback | yes | Open |
+| [0002](0002-networking-stack.md) | Direct transport and encrypted relay fallback | yes | Accepted for the architecture (hardware proof still open) |
 | [0003](0003-supported-romm-versions.md) | Supported RomM versions | yes | Accepted |
 | [0004](0004-initial-platforms.md) | Initial platform set | yes | Proposed |
 | [0005](0005-default-collection-profile.md) | Default collection profile | yes | Proposed |

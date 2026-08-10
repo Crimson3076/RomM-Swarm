@@ -63,7 +63,12 @@ exactly the members the fallback exists for.
 ## Consequences
 
 - The relay is its own module boundary from the start (`relay/`), with no import
-  of Host internals.
+  of Host internals. **Now built this way, not just decided this way:** the
+  `relay` package (ADR 0002) imports only `protocol`, never anything
+  Host-specific, and its byte/time/concurrency limits and revocation are
+  implemented and tested independently of any Host code. This proves the code
+  boundary; it does not settle the still-open deployment question below (who
+  runs it, on what host, for the pilot).
 - Grant verification has to work with only the grant and the Host's public
   verification key. The relay cannot call back into the Host on the hot path
   without becoming a Host dependency.
