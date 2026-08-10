@@ -75,7 +75,14 @@ type Library interface {
 	// Observe reports what RomM currently holds for an expectation. It must not
 	// trigger a full library rescan: Scope of Work §7 requires avoiding
 	// unnecessary load on participating RomM servers.
-	Observe(context.Context, Expected) (Observation, error)
+	//
+	// filename is what the item was published or uploaded under — the same
+	// value given to Uploader.Upload or destination.Publisher.Publish. It is
+	// used only to locate a candidate in RomM's listing; on the same principle
+	// as everywhere else in this codebase, a name never grants a match on its
+	// own. Expected carries no filename of its own for the same reason
+	// Uploader's does not — a verified identity is not a name.
+	Observe(ctx context.Context, filename string, expected Expected) (Observation, error)
 }
 
 // Reconciler waits for RomM to ingest and match a handed-off payload.
@@ -146,7 +153,7 @@ type Result struct {
 // but whose identity does not match is romm_unmatched, which is a review state:
 // Phase 6 acceptance requires that mismatch "creates a visible review state and
 // never increases coverage or resilience".
-func (r *Reconciler) Await(ctx context.Context, expected Expected) (Result, error) {
+func (r *Reconciler) Await(ctx context.Context, filename string, expected Expected) (Result, error) {
 	if err := expected.Validate(); err != nil {
 		return Result{}, err
 	}
@@ -161,7 +168,7 @@ func (r *Reconciler) Await(ctx context.Context, expected Expected) (Result, erro
 	for {
 		attempts++
 
-		obs, err := r.Library.Observe(ctx, expected)
+		obs, err := r.Library.Observe(ctx, filename, expected)
 		if err != nil {
 			// A transient RomM failure is not a mismatch. Scope of Work §7
 			// requires backoff during RomM failures rather than treating them as

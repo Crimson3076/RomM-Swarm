@@ -190,7 +190,20 @@ complete sequence — and implemented in `bridge/ingest.RommUploader`, which
 replaces `UnprobedUploader` wherever a Bridge is built against a probe that
 resolved `roms.upload`.
 
-### Still assumed, or newly identified as unbuilt
+**The observe side is now real and tested too.** `bridge/ingest.RommLibrary`
+implements `Library` against a real server, locating a candidate by the
+filename it was uploaded or published under (`Library.Observe` and
+`Reconciler.Await` both carry a `filename` parameter for this) and reusing
+`bridge/scan.Source` for listing and download rather than a second,
+independent implementation of the same calls. It never trusts RomM's
+self-reported hash fields: every candidate is downloaded and run back through
+the same `verify.Analyzer` the sending side used, so the canonical identity
+compared against `Expected` is one this Bridge computed itself.
+`TestPhase0_RommLibraryIndependentlyVerifiesRatherThanTrustingRomMsHashes`
+proves the independence directly, with RomM's own reported hash deliberately
+wrong in the test fixture.
+
+### Still assumed
 
 1. **The five-minute debounce is not necessarily universal.** It was observed
    on one instance running one version. `protocol.DefaultIngestionTimeout` (30
@@ -198,20 +211,7 @@ resolved `roms.upload`.
    constant — but if some deployments configure a much longer debounce, that
    headroom should be re-examined rather than assumed adequate everywhere.
 
-2. **`bridge/ingest.RommUploader` is real and tested; a corresponding
-   `Library` implementation for the *observe* side is not yet built.** The
-   `Reconciler` type that waits for `romm_matched` is only exercised in tests
-   against `fakeLibrary`; there is no production code yet that actually calls
-   RomM's listing API to confirm a match against a real server. This is now a
-   well-specified, unblocked piece of work rather than an open question — the
-   confirmed field shapes above are everything it needs — but it wasn't built
-   in this pass and shouldn't be assumed done. Note also that a faithful
-   implementation should independently re-verify by downloading and re-hashing
-   the matched item, consistent with this project's rule that a server-reported
-   hash is never authoritative on its own (see `ROMRecord.Hashes`'s doc comment
-   in `bridge/scan`), not simply trust RomM's self-reported `sha1_hash`.
-
-3. **`protocol.IngestionPollInterval` (15 seconds) is unconfirmed as a load
+2. **`protocol.IngestionPollInterval` (15 seconds) is unconfirmed as a load
    figure.** Scope of Work §7 asks Bridges to avoid unnecessary load on
    participating RomM servers; 15 seconds was chosen to be unhurried rather
    than tight, but nothing has measured what RomM can actually absorb. Given

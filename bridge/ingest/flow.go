@@ -237,7 +237,7 @@ func (f *Flow) Receive(
 	if err := f.advance(id, protocol.StateAwaitingRommIngestion, "waiting for RomM to index the item"); err != nil {
 		return "", err
 	}
-	result, err := f.Reconciler.Await(ctx, expected)
+	result, err := f.Reconciler.Await(ctx, filepath.Base(relativeDest), expected)
 	if err != nil && result.State == "" {
 		return "", err
 	}

@@ -25,7 +25,7 @@ type fakeLibrary struct {
 	calls int
 }
 
-func (f *fakeLibrary) Observe(context.Context, Expected) (Observation, error) {
+func (f *fakeLibrary) Observe(context.Context, string, Expected) (Observation, error) {
 	f.calls++
 	if f.err != nil {
 		return Observation{}, f.err
@@ -364,7 +364,7 @@ func TestUnreachableRommTimesOutRatherThanReportingAMismatch(t *testing.T) {
 		After:   c.After,
 	}
 
-	result, err := r.Await(context.Background(), expectationFor([]byte("x")))
+	result, err := r.Await(context.Background(), "x.gb", expectationFor([]byte("x")))
 	if err != nil {
 		t.Fatalf("Await: %v", err)
 	}
@@ -423,13 +423,13 @@ func TestJournalRefusesIllegalTransitions(t *testing.T) {
 
 func TestReconcilerRequiresACompleteExpectation(t *testing.T) {
 	r := &Reconciler{Library: &fakeLibrary{}}
-	if _, err := r.Await(context.Background(), Expected{}); err == nil {
+	if _, err := r.Await(context.Background(), "x.gb", Expected{}); err == nil {
 		t.Fatal("Await accepted an empty expectation")
 	}
 
 	incomplete := expectationFor([]byte("x"))
 	incomplete.Platform = ""
-	if _, err := r.Await(context.Background(), incomplete); err == nil {
+	if _, err := r.Await(context.Background(), "x.gb", incomplete); err == nil {
 		t.Fatal("Await accepted an expectation with no platform")
 	}
 }
@@ -443,7 +443,7 @@ func TestCancellationStopsTheWait(t *testing.T) {
 		Poll:    time.Millisecond,
 		Timeout: time.Hour,
 	}
-	result, err := r.Await(ctx, expectationFor([]byte("x")))
+	result, err := r.Await(ctx, "x.gb", expectationFor([]byte("x")))
 	if err == nil {
 		t.Fatal("a cancelled wait returned no error")
 	}
