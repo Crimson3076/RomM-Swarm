@@ -1,6 +1,6 @@
 # ADR 0003: Supported RomM versions
 
-- **Status:** Accepted, with one residual open item (standard-user verification — see below)
+- **Status:** Accepted
 - **Phase 0 gate:** yes
 - **Date:** 2026-08-06, evidence recorded 2026-08-10
 - **Scope of Work reference:** §4 gate, Phase 0 deliverables "Confirm supported RomM versions and relevant API endpoints", "Verify standard-user Client API Token behavior"
@@ -119,19 +119,45 @@ its own log line stated ("Change detected in gb folder, rescanning in 5
 minutes"). This is a property of the observed instance and version, not
 necessarily a universal constant — see that document for the full account.
 
-## What remains open
+## Standard-user (non-admin) behaviour: confirmed, and it's a scope wall
 
-**Standard-user (non-admin) behaviour is not yet verified.** The token used for
-every confirmation above belonged to an account with `"role": "admin"`. Scope of
-Work's actual requirement is standard-user behaviour *specifically* —
-`"Verify standard-user Client API Token behavior... without administrator
-access"` — because an admin token can behave differently (implicit access
-regardless of declared scopes, for instance). Everything above proves the
-*mechanism* is real and correctly implemented; it does not yet prove a
-non-admin, correctly-scoped token can do the same things. Closing this needs a
-second short probe run against a genuinely standard-role user and token. Until
-then this record is Accepted for mechanism, not fully closed for the acceptance
-criterion as stated.
+A genuine `"role": "user"` account was created and probed the same way, with
+its own Client API Token — not the admin token used above:
+
+```
+GET  /api/users/me                    → 200, role: "user", oauth_scopes:
+                                         [me.read, roms.read, platforms.read,
+                                          assets.read, devices.read,
+                                          firmware.read, roms.user.read,
+                                          collections.read, playlists.read,
+                                          me.write, assets.write,
+                                          devices.write, roms.user.write,
+                                          collections.write, playlists.write]
+GET  /api/roms?platform_id=11&limit=1 → 200, identical shape to the admin token
+POST /api/roms/upload/start           → 403 {"detail":"Forbidden"}
+```
+
+The scope list explains the 403 precisely: the default `user` role carries
+`roms.read` but never `roms.write`. Write scope exists only for
+`roms.user.*` — the account's own play data (favorites, save states, hidden
+flags), not library content — plus `assets`, `devices`, `collections`,
+`playlists`, and `me`. Reads, downloads, and reconciliation-polling all work
+identically to the admin token; only `roms.upload` is scope-gated, and it is
+gated the same way for every standard user by default, not just this one.
+
+This closes the Scope of Work deliverable as a definite, evidenced answer,
+not as a residual unknown: **a default standard-user Client API Token cannot
+perform API-only upload.** That's a fact about RomM's own authorization
+model, not a gap in this project's implementation.
+
+**What that opens instead:** whether RomM supports granting `roms.write` to a
+non-admin account through some other mechanism. The tested account's own
+record carries `"permission_group_id": null`, which reads as a hook for a
+custom-scope feature, but none was created or tried. Until that's tested, the
+practical deployment guidance is: a Bridge doing API-only upload needs either
+an admin token, or confirmation that a permission group can grant
+`roms.write` without full admin — see the acceptance evidence doc, blocker
+B7, for how this is tracked going forward.
 
 ## Consequences
 
@@ -144,17 +170,27 @@ criterion as stated.
   (`bridge/ingest/rommuploader.go`) implementing the now-confirmed protocol.
 - `bridge/ingest.RommUploader` is real, tested code, not a stub — Phase 0's "API
   read, download, upload, and ingestion workflow" is proven end to end for the
-  mechanism, pending the standard-user confirmation above.
+  mechanism, for both admin and standard-user tokens.
+- **A Bridge doing API-only upload needs a `roms.write`-scoped token, which a
+  RomM operator does not get by creating a standard user through the normal
+  flow.** Deployment guidance must say this plainly: either grant the Bridge
+  an admin token (with the threat-model consequences that implies for that
+  credential) or use a permission group granting `roms.write`, if RomM
+  supports assigning one to a non-admin account — unconfirmed, see below.
+  This is a real operational constraint discovered by evidence, not a
+  theoretical one.
 
 ## Open questions
 
 - Which RomM major versions does the pilot need to support at once? Only 5.0.0
   has been probed. Supporting a range is more expensive than supporting one, and
   the answer depends on what pilot operators actually run.
-- Does the Client API Token carry inspectable scopes independent of role? The
-  probed account's `oauth_scopes` listed every defined scope, consistent with
-  being an admin account; a standard-role token's actual scope list is still
-  unobserved.
+- Can a non-admin account be granted `roms.write` through a custom permission
+  group? The standard user's own record carries `"permission_group_id":
+  null`, which reads as a hook for such a feature, but none was created or
+  tested. This determines whether "grant an admin token to the Bridge" is a
+  temporary workaround or the actual long-term deployment story for API-only
+  upload — see acceptance-evidence.md, blocker B7.
 - Is the five-minute rescan debounce configurable per RomM instance, or fixed?
   If configurable, `protocol.DefaultIngestionTimeout` (30 minutes) has
   comfortable headroom over the one observed value; if some instances configure

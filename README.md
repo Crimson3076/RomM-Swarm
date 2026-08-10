@@ -98,7 +98,7 @@ Swarm needs, and writes a fixture bundle that CI can replay without the server.
 
 ```sh
 export ROMM_URL=https://romm.example
-export ROMM_TOKEN=<scoped standard-user Client API Token>
+export ROMM_TOKEN=<Client API Token>
 make probe
 ```
 
@@ -113,11 +113,18 @@ Exit code 2 means a required capability is missing — usable as a script gate.
 **The capability table is confirmed against a live RomM 5.0.0 instance** — see
 [ADR 0003](docs/adr/0003-supported-romm-versions.md) for the full evidence,
 including the one guess (`roms.upload`) that turned out wrong and was corrected
-from real server behavior. Standard-user (non-admin) token behavior and any
-version other than 5.0.0 are still unverified. When a candidate path doesn't
-match on some other server or version, the bundle prints every path the server
-does document, and the fix is one line in `bridge/romm/capability.go` — exactly
-how `roms.upload` was fixed.
+from real server behavior. Any RomM version other than 5.0.0 is still
+unverified. When a candidate path doesn't match on some other server or
+version, the bundle prints every path the server does document, and the fix is
+one line in `bridge/romm/capability.go` — exactly how `roms.upload` was fixed.
+
+**A default standard-user token cannot use `roms.upload` at all** — confirmed,
+not assumed: RomM's default `user` role grants `roms.read` but never
+`roms.write`. Reads, downloads, and reconciliation-polling work identically to
+an admin token; upload gets `403 Forbidden`. A Bridge doing API-only upload
+currently needs an admin token to do so — see ADR 0003 for the full evidence
+and the still-open question of whether a non-admin permission group can grant
+`roms.write` instead.
 
 ### `swarm-verify` — compute the four identities for files on disk
 
