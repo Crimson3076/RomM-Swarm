@@ -121,10 +121,11 @@ one line in `bridge/romm/capability.go` — exactly how `roms.upload` was fixed.
 **A default standard-user token cannot use `roms.upload` at all** — confirmed,
 not assumed: RomM's default `user` role grants `roms.read` but never
 `roms.write`. Reads, downloads, and reconciliation-polling work identically to
-an admin token; upload gets `403 Forbidden`. A Bridge doing API-only upload
-currently needs an admin token to do so — see ADR 0003 for the full evidence
-and the still-open question of whether a non-admin permission group can grant
-`roms.write` instead.
+an admin token; upload gets `403 Forbidden`. In practice this just means an
+operator issues their own Bridge an admin-scoped token for their own RomM
+instance — a Bridge only ever writes to its own owner's server, never
+another member's, so this doesn't widen what the credential can reach beyond
+what that operator already controls. See ADR 0003 for the full evidence.
 
 ### `swarm-verify` — compute the four identities for files on disk
 

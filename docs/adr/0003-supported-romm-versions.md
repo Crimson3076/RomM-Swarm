@@ -150,14 +150,26 @@ not as a residual unknown: **a default standard-user Client API Token cannot
 perform API-only upload.** That's a fact about RomM's own authorization
 model, not a gap in this project's implementation.
 
-**What that opens instead:** whether RomM supports granting `roms.write` to a
-non-admin account through some other mechanism. The tested account's own
-record carries `"permission_group_id": null`, which reads as a hook for a
-custom-scope feature, but none was created or tried. Until that's tested, the
-practical deployment guidance is: a Bridge doing API-only upload needs either
-an admin token, or confirmation that a permission group can grant
-`roms.write` without full admin — see the acceptance evidence doc, blocker
-B7, for how this is tracked going forward.
+**Why this is a smaller consequence than it first looks.** A Bridge only ever
+writes to its *own* owner's RomM instance — Scope of Work's architecture has
+no path where one member's Bridge writes to another member's server; a
+Bridge only ever reads from a peer via a transfer request, never writes to
+it. So "a Bridge doing upload needs an admin token" resolves to "an operator
+issues their own Bridge an admin-scoped Client API Token to their own
+server" — the same person who is already that server's admin, granting a
+credential that never leaves their own machine, to reach only their own
+library. That's consistent with T1 in the threat model
+([threat-model.md](../phase0/threat-model.md)): the credential never leaves
+the Bridge, and here it also never reaches past its own owner's data. It is
+not the same risk shape as, say, a Host or a peer Bridge holding it.
+
+Whether RomM also supports granting `roms.write` to a non-admin account
+through a permission group (the tested account's `"permission_group_id":
+null` reads as a hook for such a feature, untested) is worth knowing for
+least-privilege hygiene — an operator might prefer not to hand their Bridge
+full admin even over their own server — but it is not a blocker for anyone's
+data outside that operator's own instance. Tracked as a low-priority
+follow-up, not a deployment blocker, in acceptance-evidence.md.
 
 ## Consequences
 
@@ -173,12 +185,14 @@ B7, for how this is tracked going forward.
   mechanism, for both admin and standard-user tokens.
 - **A Bridge doing API-only upload needs a `roms.write`-scoped token, which a
   RomM operator does not get by creating a standard user through the normal
-  flow.** Deployment guidance must say this plainly: either grant the Bridge
-  an admin token (with the threat-model consequences that implies for that
-  credential) or use a permission group granting `roms.write`, if RomM
-  supports assigning one to a non-admin account — unconfirmed, see below.
-  This is a real operational constraint discovered by evidence, not a
-  theoretical one.
+  flow.** In practice, deployment guidance is simple: an operator issues
+  their own Bridge an admin-scoped Client API Token for their own instance.
+  Because a Bridge only ever writes to its own owner's server — never
+  another member's — this doesn't widen the credential's reach beyond what
+  that operator already controls. A non-admin permission group granting
+  `roms.write`, if RomM supports one, would be a nicer default for
+  least-privilege hygiene but is not required for the architecture to work
+  safely.
 
 ## Open questions
 

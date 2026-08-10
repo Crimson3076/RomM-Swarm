@@ -71,17 +71,25 @@ account's own Client API Token. Full account in
   download, and reconciliation-polling are unaffected — only the write half
   of this criterion is scope-gated.
 
-**What remains genuinely open:**
+**Why the write-scope gap doesn't widen the threat model.** A Bridge only
+ever writes to its own owner's RomM instance — the architecture has no path
+where one member's Bridge writes to another member's server, only reads via
+a transfer request. So the practical deployment guidance is simply "an
+operator issues their own Bridge an admin-scoped Client API Token for their
+own server" — the same person who already administers that server, granting
+a credential that never leaves their own Bridge and never reaches past their
+own library. Consistent with T1 in the threat model: the credential never
+leaves the Bridge.
+
+**What remains open, at low priority:**
 
 - **Whether a non-admin path to `roms.write` exists.** The tested account's
   own record carries `"permission_group_id": null`, which is suggestive of a
   RomM feature for assigning a custom scope set to a non-admin account, but
-  this has not been tested — no permission group was created or tried. If
-  RomM supports granting `roms.write` to a scoped, non-admin account, that
-  is the deployment guidance a RomM Swarm operator needs; if it doesn't, the
-  guidance is instead "a Bridge doing API-only upload needs an admin token,
-  scoped and monitored like any other credential with that power," which has
-  its own consequences for the threat model. Neither has been confirmed yet.
+  this has not been tested — no permission group was created or tried. This
+  would only matter for least-privilege hygiene (an operator preferring not
+  to grant their Bridge full admin even over their own server); it is not
+  required for the architecture to work safely.
 - **The observe/reconciliation side against real RomM is not yet built.**
   `bridge/ingest.RommUploader` (the write side) is real; a corresponding
   `Library` implementation (the read side `Reconciler` polls) is not — it's
@@ -275,8 +283,8 @@ data map so the two cannot drift apart silently.
 | B2 | **Direct-plus-relay under CGNAT is unproven.** The Phase 0 go/stop gate. | None. It needs two hosts, one genuinely behind CGNAT. A simulated CGNAT is worth doing first but is not sufficient evidence — the failure modes that matter are carrier-specific. | [ADR 0002](../adr/0002-networking-stack.md). |
 | B3 | **No reference catalogues are committed.** No-Intro DATs are not redistributed here. | The importer is proven against synthesised catalogues with real hashes. | Obtain and lock the approved DATs for the five platforms; record versions in [ADR 0004](../adr/0004-initial-platforms.md). |
 | B4 | **Legal risk acceptance is not done.** | None, and none is appropriate. | [ADR 0008](../adr/0008-pilot-legal-risk-acceptance.md). |
-| ~~B5~~ | ~~Standard-user (non-admin) token behaviour is unverified.~~ **Resolved: verified and it's a hard scope boundary, not a gap.** A real `"role": "user"` token reads exactly like admin but gets `403 Forbidden` on `roms.upload` — RomM's default user role has `roms.read` but not `roms.write`. | A Bridge doing API-only upload needs a token with `roms.write`: either an admin token, or (unconfirmed) a custom permission group if RomM supports assigning that scope to a non-admin account. | Closed as a finding. See ADR 0003. New open question: whether RomM's `permission_group_id` mechanism can grant `roms.write` without full admin — B7. |
-| B7 | **Whether a non-admin account can be granted `roms.write` via a custom permission group is unknown.** The tested user's own record carries `"permission_group_id": null`, suggesting the feature exists, but none was created or tested. | Deploy Bridges doing API-only upload with an admin token for now, scoped and monitored accordingly. | Test creating a permission group with `roms.write` against a real instance; document the result in ADR 0003. |
+| ~~B5~~ | ~~Standard-user (non-admin) token behaviour is unverified.~~ **Resolved: verified and it's a hard scope boundary, not a gap.** A real `"role": "user"` token reads exactly like admin but gets `403 Forbidden` on `roms.upload` — RomM's default user role has `roms.read` but not `roms.write`. Does not widen the threat model: a Bridge only ever writes to its own owner's instance, so the practical guidance is that operator issues their own Bridge an admin token for their own server — a credential they already effectively hold as that server's admin. | An operator's Bridge uses an admin-scoped Client API Token for their own RomM instance. | Closed as a finding. See ADR 0003. Low-priority follow-up on least-privilege hygiene — B7. |
+| B7 (low priority) | **Whether a non-admin account can be granted `roms.write` via a custom permission group is unknown.** The tested user's own record carries `"permission_group_id": null`, suggesting the feature exists, but none was created or tested. Not a blocker — see B5. | Deploy with an admin token for now; this is a nicer default, not a requirement. | Test creating a permission group with `roms.write` against a real instance, if and when convenient; document the result in ADR 0003. |
 | B6 | **A production `Library` implementation for ingestion reconciliation against real RomM is not built.** `bridge/ingest.RommUploader` (write) is real; the corresponding read-side implementation of the `Library` interface `Reconciler` polls is still only exercised against `fakeLibrary` in tests. | The confirmed response shapes (platform_slug, hash fields, `is_identified`) make this well-specified rather than blocked. | Build `bridge/ingest`'s RomM-backed `Library`, re-verifying by download rather than trusting RomM's self-reported hash. See multi-file-archive-and-ingestion-behavior.md. |
 
 ---
@@ -289,16 +297,14 @@ MVP platforms have been proven."*
 
 | Condition | Status |
 |---|---|
-| API-only import proven | **Substantially — not fully.** Every capability path and the full chunked-upload protocol are confirmed against a real server and implemented as tested code, for both admin and standard-user tokens. What keeps this from a plain "yes": standard-user upload is confirmed *scope-blocked by RomM itself* rather than merely untested, with the non-admin workaround (permission groups) still unconfirmed (B7), and there is no production ingestion-reconciliation `Library` yet, only a tested stub (B6). |
+| API-only import proven | **Substantially — not fully.** Every capability path and the full chunked-upload protocol are confirmed against a real server and implemented as tested code, for both admin and standard-user tokens. Standard-user upload is confirmed scope-blocked by RomM itself (`roms.write` isn't in the default `user` role); that resolves to "an operator uses an admin token for their own instance," which doesn't widen the threat model — see B5. What keeps this from a plain "yes" is narrower: there is no production ingestion-reconciliation `Library` yet, only a tested stub (B6). |
 | A viable CGNAT connectivity path | **No** — B2 |
 | Verification for the MVP platforms | **Yes** |
 
 **Still not all three. Phase 1 must not begin.** The gap on API-only import has
-narrowed from "the endpoints are an unconfirmed guess" to two specific,
-well-scoped follow-ups (B6, B7) plus a real deployment consequence worth
-carrying forward on its own: RomM Swarm's API-only upload path needs a
-`roms.write`-scoped token, which is not what a RomM operator gets by default
-when they create a standard user. The verification model, the protocol types,
+narrowed from "the endpoints are an unconfirmed guess" to one specific,
+well-scoped follow-up (B6): a real `Library` implementation for the observe
+side. The verification model, the protocol types,
 the identifier and alias model, the preservation metrics, and the probe are all
 in place and tested; the CGNAT condition alone is enough to keep this at
 go/stop regardless, and closing it needs hardware this codebase cannot grant
