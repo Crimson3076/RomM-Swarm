@@ -1,6 +1,12 @@
 # Network Host
 
-Central coordination service. **Phase 2 onward — no implementation yet.**
+Central coordination service. **Phase 2 onward.** Slice 1 — accounts,
+Swarms, memberships, invitations, and Bridge enrolment/revocation — is
+implemented; see [ADR 0016](../docs/adr/0016-network-host-identity-slice.md)
+for exactly what that slice does and does not cover. Everything else listed
+below (inventory index, catalogue distribution, search, sharing policies and
+grants, receipts, preservation requests, announcements, leaderboards,
+moderation) remains unimplemented.
 
 Scope of Work §5.1 responsibilities: accounts, roles, Swarms, memberships,
 invitations, Bridge enrolment and revocation, Swarm-scoped aliases, the central
@@ -22,5 +28,12 @@ moderation cases, and the role-scoped APIs.
 
 ## Blocked on
 
-- ADR 0003, supported RomM versions, for the capability contract.
-- ADR 0006, the plaintext and retention decisions the schema depends on.
+- ADR 0006, the plaintext and retention decisions the schema depends on —
+  blocks inventory, activity, and security-event storage (the parts of Host
+  beyond slice 1) but not identity/membership, whose fields are already
+  fully specified in the data map.
+
+ADR 0003 (supported RomM versions) does not actually block anything here —
+it governs the Bridge-to-RomM capability contract, which Host never touches
+(Host never receives a RomM credential). Removed from this list; it was
+never a real dependency.

@@ -39,6 +39,7 @@ point.
 | [0013](0013-client-packaging.md) | Web frontend and management application packaging | no | Open |
 | [0014](0014-refresh-rotation-recovery.md) | Refresh rotation recovery | no | Accepted |
 | [0015](0015-bridge-daemon-and-admin-ui.md) | Bridge daemon and local admin web UI | no | Accepted |
+| [0016](0016-network-host-identity-slice.md) | Network Host, slice 1: identity, Swarms, invitations, Bridge enrollment | no | Accepted |
 
 ## Phase 0 gate coverage
 
