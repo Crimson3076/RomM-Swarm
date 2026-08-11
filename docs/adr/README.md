@@ -38,6 +38,7 @@ point.
 | [0012](0012-relay-deployment.md) | Relay deployment separation | yes | Proposed |
 | [0013](0013-client-packaging.md) | Web frontend and management application packaging | no | Open |
 | [0014](0014-refresh-rotation-recovery.md) | Refresh rotation recovery | no | Accepted |
+| [0015](0015-bridge-daemon-and-admin-ui.md) | Bridge daemon and local admin web UI | no | Accepted |
 
 ## Phase 0 gate coverage
 

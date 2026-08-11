@@ -73,36 +73,13 @@ func env() (baseURL, token string) {
 	return baseURL, token
 }
 
-// connect probes the server and returns a ready-to-use client and report, the
-// same sequence every tool in this repository follows: probe first, then
-// build every subsequent request from what the probe actually resolved.
+// connect wraps romm.Connect with this CLI's os.Exit-on-failure convention.
 func connect(ctx context.Context, baseURL, token string) (*romm.Client, *romm.Report) {
-	report, err := romm.Probe(ctx, romm.ProbeOptions{BaseURL: baseURL, Token: token})
+	client, report, err := romm.Connect(ctx, baseURL, token)
 	if err != nil {
-		// Probe only returns an error for a malformed call (e.g. no URL at
-		// all); every network or server-side failure instead lands in
-		// report.Blockers/Findings below, deliberately, so a partial probe is
-		// still informative — see romm.Probe's own doc comment.
-		fail(fmt.Sprintf("probing %s: %v", baseURL, err))
+		fail(err.Error())
 	}
-	if len(report.Blockers) > 0 {
-		fail(fmt.Sprintf("could not reach %s: %s", baseURL, strings.Join(report.Blockers, "; ")))
-	}
-	if missing := romm.MissingRequired(report.Capabilities); len(missing) > 0 {
-		ids := make([]string, len(missing))
-		for i, c := range missing {
-			ids[i] = c.ID
-		}
-		fail(fmt.Sprintf("the server is missing required capabilities: %s", strings.Join(ids, ", ")))
-	}
-	if report.AuthScheme == "" {
-		fail("the server did not accept the credential — check ROMM_TOKEN")
-	}
-	scheme, ok := romm.LookupAuthScheme(report.AuthScheme)
-	if !ok {
-		fail(fmt.Sprintf("the probe accepted the credential under scheme %q, which this build does not recognise", report.AuthScheme))
-	}
-	return romm.NewClient(baseURL, token, scheme), report
+	return client, report
 }
 
 func runList(args []string) {
