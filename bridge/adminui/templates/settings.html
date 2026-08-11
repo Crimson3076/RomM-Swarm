@@ -1,0 +1,50 @@
+{{define "settings"}}{{template "header" .}}
+<h1>Settings</h1>
+
+<div class="card">
+  <h2>RomM connection</h2>
+  <form method="post" action="/settings" class="form">
+    <input type="hidden" name="section" value="connection">
+
+    <label for="romm_url">RomM URL</label>
+    <input type="url" id="romm_url" name="romm_url" required value="{{.RommURL}}">
+
+    <label for="romm_token">RomM Client API Token</label>
+    <input type="password" id="romm_token" name="romm_token" autocomplete="off"
+           placeholder="{{if .TokenConfigured}}configured — leave blank to keep it{{else}}not set{{end}}">
+
+    <label for="destination_mode">Destination mode</label>
+    <select id="destination_mode" name="destination_mode">
+      <option value="api_only" {{if eq .DestinationMode "api_only"}}selected{{end}}>API-only (upload through RomM's own API)</option>
+      <option value="filesystem_publication" {{if eq .DestinationMode "filesystem_publication"}}selected{{end}}>Filesystem publication (write directly into a mounted library)</option>
+    </select>
+
+    <label for="library_root">Library root (filesystem publication mode only)</label>
+    <input type="text" id="library_root" name="library_root" value="{{.LibraryRoot}}" placeholder="/library">
+
+    <button type="submit">Save connection settings</button>
+    <button type="button" id="test-connection">Test connection</button>
+    <span id="test-connection-result"></span>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Admin password</h2>
+  <form method="post" action="/settings" class="form">
+    <input type="hidden" name="section" value="password">
+
+    <label for="current_password">Current password</label>
+    <input type="password" id="current_password" name="current_password" required autocomplete="current-password">
+
+    <label for="new_password">New password</label>
+    <input type="password" id="new_password" name="new_password" required autocomplete="new-password" minlength="8">
+
+    <label for="new_password_confirm">Confirm new password</label>
+    <input type="password" id="new_password_confirm" name="new_password_confirm" required autocomplete="new-password" minlength="8">
+
+    <button type="submit">Change password</button>
+  </form>
+</div>
+
+<script src="/static/settings.js"></script>
+{{template "footer" .}}{{end}}

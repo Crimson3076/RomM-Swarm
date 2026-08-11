@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Crimson3076/RomM-Swarm/bridge/bridgeconfig"
+	"github.com/Crimson3076/RomM-Swarm/bridge/romm"
 	"github.com/Crimson3076/RomM-Swarm/protocol"
 )
 
@@ -21,7 +22,7 @@ import (
 // A no-op, not an error, when no config file exists yet but the env vars
 // aren't set either — that just means /setup will do the configuring.
 func (d *Daemon) Bootstrap(ctx context.Context) error {
-	_, err := d.ConfigStore.Load()
+	_, err := d.ConfigStore().Load()
 	if err == nil {
 		return nil // already configured (or already deliberately left unconfigured)
 	}
@@ -35,7 +36,7 @@ func (d *Daemon) Bootstrap(ctx context.Context) error {
 		return nil
 	}
 
-	conn, err := connect(ctx, url, token)
+	conn, err := romm.ConnectAndResolvePlatforms(ctx, url, token)
 	if err != nil {
 		return fmt.Errorf("could not seed configuration from ROMM_URL/ROMM_TOKEN: %w", err)
 	}
@@ -47,7 +48,7 @@ func (d *Daemon) Bootstrap(ctx context.Context) error {
 	if root := strings.TrimSpace(os.Getenv("BRIDGE_LIBRARY_ROOT")); root != "" {
 		cfg.LibraryRoot = root
 	}
-	if err := d.ConfigStore.Save(cfg); err != nil {
+	if err := d.ConfigStore().Save(cfg); err != nil {
 		return fmt.Errorf("seeding configuration: %w", err)
 	}
 	d.conn.Store(conn)

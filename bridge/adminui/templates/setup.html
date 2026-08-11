@@ -1,0 +1,21 @@
+{{define "setup"}}{{template "header" .}}
+<h1>First-time setup</h1>
+<p>Connect this Bridge to your own RomM server and choose an admin password.
+This information is stored only on this Bridge, in its own local config.</p>
+
+<form method="post" action="/setup" class="form">
+  <label for="romm_url">RomM URL</label>
+  <input type="url" id="romm_url" name="romm_url" placeholder="https://romm.example" required value="{{.RommURL}}">
+
+  <label for="romm_token">RomM Client API Token</label>
+  <input type="password" id="romm_token" name="romm_token" required autocomplete="off">
+
+  <label for="password">Admin password</label>
+  <input type="password" id="password" name="password" required autocomplete="new-password" minlength="8">
+
+  <label for="password_confirm">Confirm admin password</label>
+  <input type="password" id="password_confirm" name="password_confirm" required autocomplete="new-password" minlength="8">
+
+  <button type="submit">Connect and finish setup</button>
+</form>
+{{template "footer" .}}{{end}}

@@ -12,6 +12,7 @@ import (
 	"github.com/Crimson3076/RomM-Swarm/bridge/bridgeconfig"
 	"github.com/Crimson3076/RomM-Swarm/bridge/destination"
 	"github.com/Crimson3076/RomM-Swarm/bridge/ingest"
+	"github.com/Crimson3076/RomM-Swarm/bridge/romm"
 	"github.com/Crimson3076/RomM-Swarm/bridge/scan"
 	"github.com/Crimson3076/RomM-Swarm/protocol"
 	"github.com/Crimson3076/RomM-Swarm/verify"
@@ -25,12 +26,17 @@ import (
 // the only things that change from the one-shot CLI are the staging
 // directory (fixed and persistent here, not os.MkdirTemp+RemoveAll) and the
 // Journal (FileJournal, not an in-memory one).
+//
+// Fields are private with accessor methods rather than exported directly,
+// so Daemon can satisfy bridge/adminui.Backend (an interface, which only
+// sees methods) without a naming collision between a field and a method of
+// the same name.
 type Daemon struct {
-	ConfigStore *bridgeconfig.FileStore
-	Journal     *ingest.FileJournal
-	Staging     *destination.Staging
+	configStore *bridgeconfig.FileStore
+	journal     *ingest.FileJournal
+	staging     *destination.Staging
 
-	conn atomic.Pointer[Connection]
+	conn atomic.Pointer[romm.Connection]
 }
 
 // NewDaemon prepares persistent state rooted at configDir: the config file
@@ -57,27 +63,33 @@ func NewDaemon(configDir string) (*Daemon, error) {
 		return nil, err
 	}
 
-	return &Daemon{ConfigStore: store, Journal: journal, Staging: staging}, nil
+	return &Daemon{configStore: store, journal: journal, staging: staging}, nil
 }
 
-// Connection returns the currently live RomM connection, or nil if the
-// Bridge hasn't connected yet — unconfigured, or the last attempt failed.
-func (d *Daemon) Connection() *Connection { return d.conn.Load() }
+// ConfigStore implements bridge/adminui.Backend.
+func (d *Daemon) ConfigStore() *bridgeconfig.FileStore { return d.configStore }
 
-// Reconnect loads the persisted config, connects to RomM, and swaps in the
-// result atomically. Safe to call repeatedly, e.g. after settings change
-// through the admin UI: a transfer already in flight keeps using whatever
-// Connection was live when it started (see StartImport), and only the next
-// one picks up the new settings.
+// Journal implements bridge/adminui.Backend.
+func (d *Daemon) Journal() *ingest.FileJournal { return d.journal }
+
+// Connection implements bridge/adminui.Backend. Returns nil if the Bridge
+// hasn't connected yet — unconfigured, or the last attempt failed.
+func (d *Daemon) Connection() *romm.Connection { return d.conn.Load() }
+
+// Reconnect implements bridge/adminui.Backend: loads the persisted config,
+// connects to RomM, and swaps in the result atomically. Safe to call
+// repeatedly, e.g. after settings change through the admin UI: a transfer
+// already in flight keeps using whatever Connection was live when it
+// started (see StartImport), and only the next one picks up new settings.
 func (d *Daemon) Reconnect(ctx context.Context) error {
-	cfg, err := d.ConfigStore.Load()
+	cfg, err := d.configStore.Load()
 	if err != nil {
 		return err
 	}
 	if !cfg.Configured() {
 		return bridgeconfig.ErrNotConfigured
 	}
-	conn, err := connect(ctx, cfg.RommURL, cfg.RommToken)
+	conn, err := romm.ConnectAndResolvePlatforms(ctx, cfg.RommURL, cfg.RommToken)
 	if err != nil {
 		return err
 	}
@@ -85,15 +97,20 @@ func (d *Daemon) Reconnect(ctx context.Context) error {
 	return nil
 }
 
-// StartImport validates a local file against a platform and, if it checks
-// out, launches the real receiving flow (stage, verify, upload through
-// RomM's API, wait for RomM to index and match it) in the background,
-// returning the TransferID immediately so a caller (the admin UI) doesn't
-// block on RomM's confirmed multi-minute ingestion debounce. Progress is
-// visible through d.Journal from that point on; StartImport itself only
-// reports the synchronous, fast-to-detect problems (no connection, no such
-// file, wrong platform).
-func (d *Daemon) StartImport(localPath, platformSlug string, timeout time.Duration) (protocol.TransferID, error) {
+// StartImport implements bridge/adminui.Backend: validates a local file
+// against a platform and, if it checks out, launches the real receiving
+// flow (stage, verify, upload through RomM's API, wait for RomM to index
+// and match it) in the background, returning the TransferID immediately so
+// a caller doesn't block on RomM's confirmed multi-minute ingestion
+// debounce. Progress is visible through Journal() from that point on;
+// StartImport itself only reports the synchronous, fast-to-detect problems
+// (no connection, no such file, wrong platform).
+//
+// cleanup, if non-nil, runs once the import goroutine is done with
+// localPath (success or failure) — for a file the Bridge itself staged
+// temporarily (a browser upload), never for a file the operator owns (an
+// inbox file), which must never be deleted out from under them.
+func (d *Daemon) StartImport(localPath, platformSlug string, timeout time.Duration, cleanup func()) (protocol.TransferID, error) {
 	conn := d.Connection()
 	if conn == nil {
 		return "", errors.New("bridge: not connected to a RomM server yet")
@@ -129,21 +146,24 @@ func (d *Daemon) StartImport(localPath, platformSlug string, timeout time.Durati
 	library := &ingest.RommLibrary{Source: &scan.RommSource{Client: conn.Client, Report: conn.Report}}
 	flow := &ingest.Flow{
 		Mode:       protocol.ModeAPIOnly,
-		Staging:    d.Staging,
-		Journal:    d.Journal,
+		Staging:    d.staging,
+		Journal:    d.journal,
 		Uploader:   &ingest.RommUploader{Client: conn.Client, Report: conn.Report, Platforms: conn.Platforms},
 		Reconciler: &ingest.Reconciler{Library: library, Timeout: timeout},
 	}
 
 	go func() {
 		defer f.Close()
+		if cleanup != nil {
+			defer cleanup()
+		}
 		// A background import must not be bound to any request's lifetime;
 		// it gets its own timeout instead, generous enough to cover the
 		// upload itself plus the full reconciliation wait.
 		ctx, cancel := context.WithTimeout(context.Background(), timeout+2*time.Minute)
 		defer cancel()
 		flow.Receive(ctx, id, f, expected, relativeDest)
-		// Errors and the terminal state are already recorded in d.Journal by
+		// Errors and the terminal state are already recorded in d.journal by
 		// Flow itself; there is nothing further to do with the return value.
 	}()
 

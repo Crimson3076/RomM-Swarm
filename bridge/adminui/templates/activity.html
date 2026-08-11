@@ -1,0 +1,34 @@
+{{define "activity"}}{{template "header" .}}
+<h1>Activity</h1>
+
+{{if .Detail}}
+<div class="card">
+  <h2>Transfer {{.Detail.ID}}</h2>
+  <table class="table">
+    <thead><tr><th>State</th><th>At</th><th>Detail</th></tr></thead>
+    <tbody>
+    {{range .Detail.History}}
+      <tr><td>{{.To}}</td><td>{{.At}}</td><td>{{.Detail}}</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+  <p><a href="/activity">Back to all activity</a></p>
+</div>
+{{else}}
+<table class="table" id="activity-table">
+  <thead><tr><th>Transfer</th><th>State</th><th></th></tr></thead>
+  <tbody>
+  {{range .Recent}}
+    <tr>
+      <td>{{.ID}}</td>
+      <td class="state-{{.State}}">{{.State}}</td>
+      <td><a href="/activity?id={{.ID}}">Details</a></td>
+    </tr>
+  {{else}}
+    <tr><td colspan="3">No transfers yet.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+<p class="hint">This page refreshes automatically every 5 seconds.</p>
+{{end}}
+{{template "footer" .}}{{end}}

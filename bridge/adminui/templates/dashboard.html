@@ -1,0 +1,27 @@
+{{define "dashboard"}}{{template "header" .}}
+<h1>Dashboard</h1>
+
+<div class="card">
+  <h2>Connection</h2>
+  {{if .Connected}}
+    <p class="status status-ok">Connected to <strong>{{.RommURL}}</strong>{{if .ServerVersion}} (RomM {{.ServerVersion}}){{end}}</p>
+  {{else}}
+    <p class="status status-bad">Not connected. Check <a href="/settings">Settings</a>.</p>
+  {{end}}
+</div>
+
+<div class="card-grid">
+  <a class="card card-link" href="/library">
+    <h2>Library</h2>
+    <p>Browse what your RomM server already holds, and pull a copy of an item back to local disk.</p>
+  </a>
+  <a class="card card-link" href="/inbox">
+    <h2>Inbox</h2>
+    <p>Import a file into RomM through the real chunked upload pipeline.</p>
+  </a>
+  <a class="card card-link" href="/activity">
+    <h2>Activity</h2>
+    <p>Watch an import move through staging, upload, and RomM's own matching.</p>
+  </a>
+</div>
+{{template "footer" .}}{{end}}

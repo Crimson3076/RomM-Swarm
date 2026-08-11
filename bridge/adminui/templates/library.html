@@ -1,0 +1,30 @@
+{{define "library"}}{{template "header" .}}
+<h1>Library</h1>
+<p>What your RomM server reports it holds. Pulling a copy streams it straight
+from RomM to your browser — nothing is staged on the Bridge for this.</p>
+
+<form method="get" action="/library" class="form form-inline">
+  <label for="platform">Platform</label>
+  <input type="text" id="platform" name="platform" value="{{.Platform}}" placeholder="gb, gba, nds, genesis, or any slug RomM reports">
+  <button type="submit">Filter</button>
+</form>
+
+{{if .Error}}<div class="flash flash-error">{{.Error}}</div>{{end}}
+
+<table class="table">
+  <thead><tr><th>Name</th><th>Platform</th><th>Size</th><th></th></tr></thead>
+  <tbody>
+  {{range .Items}}
+    <tr>
+      <td>{{.FSName}}</td>
+      <td>{{.PlatformSlug}}</td>
+      <td>{{.SizeHuman}}</td>
+      <td><a href="/api/library/download?id={{.ID}}&name={{.FSName}}">Download</a></td>
+    </tr>
+  {{else}}
+    <tr><td colspan="4">No items{{if .Platform}} on platform "{{.Platform}}"{{end}}.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+<p>{{.Count}} item(s) shown, out of {{.Scanned}} scanned.</p>
+{{template "footer" .}}{{end}}

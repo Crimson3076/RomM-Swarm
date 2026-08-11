@@ -1,0 +1,8 @@
+{{define "login"}}{{template "header" .}}
+<h1>Log in</h1>
+<form method="post" action="/login" class="form">
+  <label for="password">Admin password</label>
+  <input type="password" id="password" name="password" required autofocus>
+  <button type="submit">Log in</button>
+</form>
+{{template "footer" .}}{{end}}

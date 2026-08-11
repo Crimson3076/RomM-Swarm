@@ -246,7 +246,7 @@ func TestPhase0_DaemonBootstrapsConnectsAndImports(t *testing.T) {
 		t.Fatal("Bootstrap did not leave a live connection")
 	}
 
-	cfg, err := d.ConfigStore.Load()
+	cfg, err := d.ConfigStore().Load()
 	if err != nil {
 		t.Fatalf("loading the seeded config: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestPhase0_DaemonBootstrapsConnectsAndImports(t *testing.T) {
 		t.Fatalf("writing the fixture: %v", err)
 	}
 
-	id, err := d.StartImport(path, "gb", 30*time.Second)
+	id, err := d.StartImport(path, "gb", 30*time.Second, nil)
 	if err != nil {
 		t.Fatalf("StartImport: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestPhase0_DaemonBootstrapsConnectsAndImports(t *testing.T) {
 	var state protocol.DestinationState
 	for time.Now().Before(deadline) {
 		var ok bool
-		state, ok = d.Journal.Current(id)
+		state, ok = d.Journal().Current(id)
 		if ok && (state.Terminal() || state == protocol.StateSourceActive) {
 			break
 		}
@@ -277,13 +277,13 @@ func TestPhase0_DaemonBootstrapsConnectsAndImports(t *testing.T) {
 	}
 
 	if state != protocol.StateSourceActive {
-		history := d.Journal.History(id)
+		history := d.Journal().History(id)
 		t.Fatalf("final state = %s, want source_active. History: %+v", state, history)
 	}
 
 	// The journal is really on disk, under this Daemon's own journal
 	// directory, not held in memory.
-	entries, err := os.ReadDir(d.Journal.Dir)
+	entries, err := os.ReadDir(d.Journal().Dir)
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("journal directory has %d entries (err %v), want exactly 1", len(entries), err)
 	}
@@ -294,7 +294,7 @@ func TestStartImportFailsFastWithoutAConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDaemon: %v", err)
 	}
-	if _, err := d.StartImport("/does/not/matter", "gb", time.Minute); err == nil {
+	if _, err := d.StartImport("/does/not/matter", "gb", time.Minute, nil); err == nil {
 		t.Fatal("StartImport succeeded with no RomM connection established")
 	}
 }
@@ -305,7 +305,7 @@ func TestStartImportRejectsAWrongPlatformFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDaemon: %v", err)
 	}
-	if err := d.ConfigStore.Save(bridgeconfig.Config{RommURL: srv.URL, RommToken: "t"}); err != nil {
+	if err := d.ConfigStore().Save(bridgeconfig.Config{RommURL: srv.URL, RommToken: "t"}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	if err := d.Reconnect(context.Background()); err != nil {
@@ -318,7 +318,7 @@ func TestStartImportRejectsAWrongPlatformFile(t *testing.T) {
 		t.Fatalf("writing the fixture: %v", err)
 	}
 
-	if _, err := d.StartImport(path, "gba", time.Minute); err == nil {
+	if _, err := d.StartImport(path, "gba", time.Minute, nil); err == nil {
 		t.Fatal("StartImport accepted a Game Boy file declared as gba")
 	}
 }
