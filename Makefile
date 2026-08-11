@@ -11,6 +11,7 @@ build:
 	$(GO) build -o $(BIN)/swarm-verify ./cmd/swarm-verify
 	$(GO) build -o $(BIN)/swarm-fixtures ./cmd/swarm-fixtures
 	$(GO) build -o $(BIN)/swarm-bridge ./cmd/swarm-bridge
+	$(GO) build -o $(BIN)/bridge ./cmd/bridge
 
 # Generate a sample library and catalogue, then classify it. Exercises the whole
 # verification pipeline by hand without touching a real collection.
@@ -56,6 +57,23 @@ probe: build
 	@test -n "$$ROMM_URL"   || { echo "ROMM_URL is not set";   exit 1; }
 	@test -n "$$ROMM_TOKEN" || { echo "ROMM_TOKEN is not set"; exit 1; }
 	$(BIN)/swarm-probe -out probe-out
+
+.PHONY: docker-build
+docker-build:
+	docker build -t romm-swarm-bridge:dev .
+
+# Local click-around testing: a throwaway named volume for /data, port 8080
+# published, foreground so Ctrl-C stops it. Set ROMM_URL/ROMM_TOKEN in the
+# environment to seed a first connection, or leave them unset and use the
+# admin UI's /setup flow instead.
+.PHONY: docker-run
+docker-run: docker-build
+	docker run --rm -it \
+		-p 8080:8080 \
+		-v romm-swarm-bridge-dev-data:/data \
+		-e ROMM_URL \
+		-e ROMM_TOKEN \
+		romm-swarm-bridge:dev
 
 .PHONY: clean
 clean:

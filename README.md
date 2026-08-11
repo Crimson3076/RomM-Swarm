@@ -39,11 +39,13 @@ Scope of Work §13.1 asks for `host`, `bridge`, `relay`, `web`, `protocol`, and
 | `bridge/publish/` | Per-Swarm sharing policies and filtered manifests | 0 |
 | `bridge/ingest/` | RomM ingestion reconciliation and the receiving-flow driver | 0 |
 | `bridge/transport/` | Direct-first, relay-fallback connectivity: routing, resume, mid-transfer route switching | 0 |
+| `bridge/bridgeconfig/` | Persistent Bridge config (RomM connection, destination mode, admin password hash) | 0 |
+| `bridge/adminui/` | Local admin web UI: setup, settings, library, inbox/import, activity (ADR 0015) | 0 |
 | `bridge/` | Local agent: scanning, transfers, policy configuration | 1 |
 | `host/` | Network Host: identity, invitations, index, grants | 2 |
 | `relay/` | Encrypted fallback transport: pairing, byte/time/concurrency/bandwidth limits, revocation | 0 |
 | `web/` | Member portal | 5 |
-| `cmd/` | `swarm-probe`, `swarm-verify`, `swarm-fixtures`, `swarm-bridge` | 0 |
+| `cmd/` | `swarm-probe`, `swarm-verify`, `swarm-fixtures`, `swarm-bridge`, `bridge` | 0 |
 | `internal/` | Test doubles: synthesised ROM fixtures, a fake RomM server | 0 |
 | `docs/adr/` | An architecture decision record per Phase 0 gate | 0 |
 | `docs/phase0/` | Data map, privacy disclosure, retention schedule, threat model, filesystem-publication trust writeup, archive/ingestion behavior, evidence ledger | 0 |
@@ -169,6 +171,38 @@ swarm-bridge upload gb ./game.gb              # stage, verify, upload, and wait 
 It writes to your real RomM library; there is nothing simulated once it
 starts. See the package doc in `cmd/swarm-bridge/main.go` for exactly what it
 does and does not prove.
+
+### `bridge` — the persistent Bridge daemon and admin web UI
+
+Unlike `swarm-bridge` above, this is meant to run continuously: a persistent
+config, a persistent transfer journal, and a local admin web UI (`bridge/adminui`,
+ADR 0015) for managing the RomM connection, the admin password, imports, and
+activity — all through a browser rather than environment variables.
+
+This is still a **single-Bridge, single-operator** tool talking to your own
+RomM instance over its API. It does not implement cross-Bridge federation
+(`bridge/transport`, `relay/`, `host/`) and does not claim the Phase 1
+go/stop gate above is satisfied.
+
+Run it with Docker:
+
+```sh
+docker compose up --build
+```
+
+Then open `http://localhost:8080` and complete `/setup` (RomM URL, a Client
+API Token, and an admin password) — or set `ROMM_URL`/`ROMM_TOKEN` in the
+environment first to skip straight to a configured Bridge on first boot.
+Config, the transfer journal, and in-flight staging all persist in the
+`bridge-data` volume across restarts. Drop files into `./inbox` (bind-mounted
+read-only) to import them through the UI without a round trip through the
+browser, or just use the browser upload form.
+
+Or run it directly:
+
+```sh
+make build && BRIDGE_CONFIG_DIR=./data ./bin/bridge
+```
 
 ---
 

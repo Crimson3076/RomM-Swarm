@@ -1,0 +1,10 @@
+.git
+bin/
+probe-out/
+*.probe.json
+*.env
+secrets/
+docs/
+web/
+host/
+.github/

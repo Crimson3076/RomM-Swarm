@@ -1,0 +1,31 @@
+# Runs the Bridge admin daemon (ADR 0015). All configuration — the RomM
+# connection, the admin password, the destination mode — can be set through
+# the web UI's /setup flow once this is up; ROMM_URL/ROMM_TOKEN below are an
+# optional first-boot convenience, not a requirement.
+services:
+  bridge:
+    build: .
+    image: romm-swarm-bridge:dev
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persistent state: config.json, the transfer journal, and staged
+      # in-flight transfers. Must survive container recreation.
+      - bridge-data:/data
+      # Optional: files here are importable through the admin UI's Inbox
+      # page without a double-transfer through the browser. Point this at
+      # wherever ROMs land before they're catalogued.
+      - ${BRIDGE_INBOX_HOST_DIR:-./inbox}:/inbox:ro
+    environment:
+      BRIDGE_CONFIG_DIR: /data
+      BRIDGE_LISTEN_ADDR: :8080
+      BRIDGE_INBOX_DIR: /inbox
+      # Optional first-boot seed — leave unset to configure entirely through
+      # /setup instead. Only takes effect if /data/config.json doesn't exist
+      # yet.
+      ROMM_URL: ${ROMM_URL:-}
+      ROMM_TOKEN: ${ROMM_TOKEN:-}
+
+volumes:
+  bridge-data:
