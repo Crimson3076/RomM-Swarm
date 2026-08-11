@@ -1,0 +1,220 @@
+package directory_test
+
+import (
+	"context"
+	"crypto/rand"
+	"errors"
+	"sync"
+	"sync/atomic"
+	"testing"
+
+	"github.com/Crimson3076/RomM-Swarm/auth"
+)
+
+// TestPhase2_ConcurrentRotateIsSerializedByTheMutex is the before/after
+// pairing with TestPhase2_ConcurrentRotateWithoutLockingCorruptsState
+// (host/hoststore/bridgecredentials_test.go): the exact same scenario — N
+// goroutines presenting the same current token for one BridgeID
+// concurrently — run through Directory.RotateBridgeCredential instead of
+// the bare Store.
+//
+// The expected outcome is not "exactly one success": auth.Verifier's own
+// protocol legitimately allows a second presentation of the token that was
+// just superseded to succeed once, via the crash-recovery path (see
+// auth/refresh.go's OutcomeRecovered) — that is what lets a Bridge that
+// crashed mid-rotation recover. A third or later presentation of the same
+// token is indistinguishable from replay and revokes the whole family.
+// So with the mutex serializing access, this scenario has exactly one
+// correct, deterministic outcome: the first presentation rotates, the
+// second recovers, everything from the third onward is rejected as reuse
+// and the family ends up revoked. That determinism — the same outcome
+// every run — is the proof the mutex fixed the hazard: without it
+// (host/hoststore's version of this test), the outcome is undefined and
+// varies run to run, with most "successful" callers silently holding a
+// token that was never actually live.
+func TestPhase2_ConcurrentRotateIsSerializedByTheMutex(t *testing.T) {
+	d := newTestDirectory(t)
+	ctx := context.Background()
+
+	owner, err := d.BootstrapOwner(ctx, "owner", "The Owner", "", "the-password")
+	if err != nil {
+		t.Fatalf("BootstrapOwner: %v", err)
+	}
+	swarmID, err := d.CreateSwarm(ctx, owner, "Test Swarm")
+	if err != nil {
+		t.Fatalf("CreateSwarm: %v", err)
+	}
+	code, _, err := d.IssueInvitation(ctx, swarmID, owner, 1, 0)
+	if err != nil {
+		t.Fatalf("IssueInvitation: %v", err)
+	}
+	key := randomKey(t)
+	bridgeID, initial, err := d.RedeemInvitation(ctx, code, key)
+	if err != nil {
+		t.Fatalf("RedeemInvitation: %v", err)
+	}
+
+	const n = 12
+	var (
+		wg        sync.WaitGroup
+		rotated   int64
+		recovered int64
+	)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result, err := d.RotateBridgeCredential(ctx, bridgeID, initial)
+			if err != nil {
+				return
+			}
+			switch result.Outcome {
+			case auth.OutcomeRotated:
+				atomic.AddInt64(&rotated, 1)
+			case auth.OutcomeRecovered:
+				atomic.AddInt64(&recovered, 1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// Deterministic, every run: exactly one normal rotation and exactly
+	// one grace-window recovery succeed; everything else is rejected. A
+	// racy implementation would make this vary run to run instead.
+	if rotated != 1 {
+		t.Errorf("normal rotations = %d, want exactly 1", rotated)
+	}
+	if recovered != 1 {
+		t.Errorf("grace-window recoveries = %d, want exactly 1", recovered)
+	}
+
+	// A third or later presentation of the same token looks like replay
+	// and revokes the whole family — the protocol's own designed
+	// response, not a bug.
+	if _, err := d.RotateBridgeCredential(ctx, bridgeID, initial); !errors.Is(err, auth.ErrFamilyRevoked) {
+		t.Fatalf("rotating a third time: err = %v, want ErrFamilyRevoked (the family should already be revoked by the concurrent replay above)", err)
+	}
+}
+
+// TestPhase2_ConcurrentRedemptionOfASingleUseInvitationAllowsOnlyOne covers
+// the other race named in ADR 0016: two different Bridge keys redeeming
+// the same single-use invitation concurrently. The per-BridgeID mutex
+// doesn't apply here (different keys, different BridgeIDs) — this is
+// purely the invitation UPDATE's own row-level locking.
+func TestPhase2_ConcurrentRedemptionOfASingleUseInvitationAllowsOnlyOne(t *testing.T) {
+	d := newTestDirectory(t)
+	ctx := context.Background()
+
+	owner, err := d.BootstrapOwner(ctx, "owner", "The Owner", "", "the-password")
+	if err != nil {
+		t.Fatalf("BootstrapOwner: %v", err)
+	}
+	swarmID, err := d.CreateSwarm(ctx, owner, "Test Swarm")
+	if err != nil {
+		t.Fatalf("CreateSwarm: %v", err)
+	}
+	code, _, err := d.IssueInvitation(ctx, swarmID, owner, 1, 0)
+	if err != nil {
+		t.Fatalf("IssueInvitation: %v", err)
+	}
+
+	const n = 8
+	var (
+		wg        sync.WaitGroup
+		succeeded int64
+	)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, _, err := d.RedeemInvitation(ctx, code, randomKey(t)); err == nil {
+				atomic.AddInt64(&succeeded, 1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if succeeded != 1 {
+		t.Fatalf("concurrent redemptions succeeded = %d, want exactly 1", succeeded)
+	}
+}
+
+func TestPhase2_RevokedBridgeCannotRotate(t *testing.T) {
+	d := newTestDirectory(t)
+	ctx := context.Background()
+
+	owner, err := d.BootstrapOwner(ctx, "owner", "The Owner", "", "the-password")
+	if err != nil {
+		t.Fatalf("BootstrapOwner: %v", err)
+	}
+	swarmID, err := d.CreateSwarm(ctx, owner, "Test Swarm")
+	if err != nil {
+		t.Fatalf("CreateSwarm: %v", err)
+	}
+	code, _, err := d.IssueInvitation(ctx, swarmID, owner, 1, 0)
+	if err != nil {
+		t.Fatalf("IssueInvitation: %v", err)
+	}
+	bridgeID, token, err := d.RedeemInvitation(ctx, code, randomKey(t))
+	if err != nil {
+		t.Fatalf("RedeemInvitation: %v", err)
+	}
+
+	if err := d.RevokeBridge(ctx, bridgeID, "operator disabled it"); err != nil {
+		t.Fatalf("RevokeBridge: %v", err)
+	}
+	if _, err := d.RotateBridgeCredential(ctx, bridgeID, token); err == nil {
+		t.Fatal("RotateBridgeCredential succeeded against a revoked Bridge")
+	}
+}
+
+func TestPhase2_ReenrolledBridgeCanRotateAgain(t *testing.T) {
+	d := newTestDirectory(t)
+	ctx := context.Background()
+
+	owner, err := d.BootstrapOwner(ctx, "owner", "The Owner", "", "the-password")
+	if err != nil {
+		t.Fatalf("BootstrapOwner: %v", err)
+	}
+	swarmID, err := d.CreateSwarm(ctx, owner, "Test Swarm")
+	if err != nil {
+		t.Fatalf("CreateSwarm: %v", err)
+	}
+	code, _, err := d.IssueInvitation(ctx, swarmID, owner, 1, 0)
+	if err != nil {
+		t.Fatalf("IssueInvitation: %v", err)
+	}
+	bridgeID, _, err := d.RedeemInvitation(ctx, code, randomKey(t))
+	if err != nil {
+		t.Fatalf("RedeemInvitation: %v", err)
+	}
+	if err := d.RevokeBridge(ctx, bridgeID, "testing re-enrollment"); err != nil {
+		t.Fatalf("RevokeBridge: %v", err)
+	}
+
+	fresh, err := d.ReenrollBridge(ctx, bridgeID)
+	if err != nil {
+		t.Fatalf("ReenrollBridge: %v", err)
+	}
+	if _, err := d.RotateBridgeCredential(ctx, bridgeID, fresh); err != nil {
+		t.Fatalf("RotateBridgeCredential after re-enrollment: %v", err)
+	}
+}
+
+func TestPhase2_RedeemInvitationRejectsAnInvalidCode(t *testing.T) {
+	d := newTestDirectory(t)
+	ctx := context.Background()
+
+	if _, _, err := d.RedeemInvitation(ctx, "not-a-real-code", randomKey(t)); err == nil {
+		t.Fatal("RedeemInvitation accepted a code that was never issued")
+	}
+}
+
+func randomKey(t *testing.T) []byte {
+	t.Helper()
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		t.Fatalf("generating a test key: %v", err)
+	}
+	return b
+}

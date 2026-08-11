@@ -21,6 +21,7 @@ type Directory struct {
 
 	verifier *auth.Verifier
 	events   *hoststore.EventStore
+	locks    bridgeLocks
 }
 
 // New returns a Directory backed by db. The schema must already be applied
