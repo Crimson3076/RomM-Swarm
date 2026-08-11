@@ -45,20 +45,55 @@ jobs:
       - name: Phase 0 evidence
         run: go test -run TestPhase0 -v ./...
 
+  # host/... has real Postgres-backed tests (see host/hoststore/hoststoretest),
+  # gated on TEST_POSTGRES_DSN so go test ./... elsewhere needs no external
+  # service. This is the one job in CI where that gate is satisfied — the
+  # rest of the suite (the `build` job above) stays exactly as
+  # dependency-free as before. Same discipline ADR 0015 kept for Docker.
+  host:
+    name: Host tests against Postgres
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: host
+          POSTGRES_PASSWORD: host
+          POSTGRES_DB: host
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U host"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Test host/... against real Postgres
+        env:
+          TEST_POSTGRES_DSN: postgres://host:host@localhost:5432/host?sslmode=disable
+        run: go test ./host/... -race -v
+
   docker:
     name: Docker build and smoke test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build image
+      - name: Build bridge image
         run: docker build -t romm-swarm-bridge:ci .
 
       # No live RomM server here, consistent with the rest of CI — this only
       # proves the image boots, serves the admin UI unconfigured, and that
       # -healthcheck (what Docker's own HEALTHCHECK runs, since the runtime
       # image has no shell) reports healthy.
-      - name: Boot and check /healthz
+      - name: Boot bridge and check /healthz
         run: |
           docker run -d --name bridge-smoke -p 8080:8080 romm-swarm-bridge:ci
           for i in $(seq 1 20); do
@@ -75,6 +110,54 @@ jobs:
           done
           docker exec bridge-smoke /bridge -healthcheck -addr :8080
 
-      - name: Stop container
+      - name: Stop bridge container
         if: always()
         run: docker rm -f bridge-smoke || true
+
+      - name: Build host image
+        run: docker build -f Dockerfile.host -t romm-swarm-host:ci .
+
+      # cmd/host fails fast if it can't reach Postgres, so this smoke test
+      # needs a real one alongside it — a plain docker network plus a
+      # postgres:16-alpine container, mirroring what docker-compose.yml
+      # does for local click-around testing.
+      - name: Boot host + Postgres and check /healthz
+        run: |
+          docker network create host-smoke-net
+          docker run -d --name host-smoke-postgres --network host-smoke-net \
+            -e POSTGRES_USER=host -e POSTGRES_PASSWORD=host -e POSTGRES_DB=host \
+            postgres:16-alpine
+          for i in $(seq 1 30); do
+            if docker exec host-smoke-postgres pg_isready -U host > /dev/null 2>&1; then
+              echo "postgres ready"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "postgres never became ready"
+              docker logs host-smoke-postgres
+              exit 1
+            fi
+            sleep 1
+          done
+          docker run -d --name host-smoke --network host-smoke-net -p 8081:8081 \
+            -e HOST_DATABASE_URL="postgres://host:host@host-smoke-postgres:5432/host?sslmode=disable" \
+            romm-swarm-host:ci
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8081/healthz > /dev/null; then
+              echo "healthz ok"
+              break
+            fi
+            if [ "$i" -eq 20 ]; then
+              echo "host never became healthy"
+              docker logs host-smoke
+              exit 1
+            fi
+            sleep 1
+          done
+          docker exec host-smoke /host -healthcheck -addr :8081
+
+      - name: Stop host containers
+        if: always()
+        run: |
+          docker rm -f host-smoke host-smoke-postgres || true
+          docker network rm host-smoke-net || true
