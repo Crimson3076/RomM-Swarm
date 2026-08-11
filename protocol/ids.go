@@ -46,14 +46,15 @@ const idBytes = 16
 
 // Identifier prefixes.
 const (
-	prefixBridge   = "brg"
-	prefixUser     = "usr"
-	prefixSwarm    = "swm"
-	prefixTransfer = "xfr"
-	prefixGame     = "gam"
-	prefixFile     = "fil"
-	prefixAlias    = "sba"
-	prefixGrant    = "grt"
+	prefixBridge     = "brg"
+	prefixUser       = "usr"
+	prefixSwarm      = "swm"
+	prefixTransfer   = "xfr"
+	prefixGame       = "gam"
+	prefixFile       = "fil"
+	prefixAlias      = "sba"
+	prefixGrant      = "grt"
+	prefixInvitation = "inv"
 )
 
 // Domain separation tags. A digest computed for one identifier kind must never
@@ -95,6 +96,13 @@ type (
 
 	// BridgeAlias is a Swarm-scoped pseudonym for a Bridge. See alias.go.
 	BridgeAlias string
+
+	// InvitationID identifies one issued Swarm invitation. It is a public,
+	// loggable identifier for the invitation record itself — never the
+	// secret redemption code, which is a Host-local concept (see
+	// host/directory), not a protocol type, precisely so a secret is never
+	// mixed into this self-describing, safe-to-log identifier namespace.
+	InvitationID string
 )
 
 // Revision is a Bridge's monotonic inventory revision within one Swarm. It
@@ -153,6 +161,9 @@ func NewTransferID() TransferID { return TransferID(encode(prefixTransfer, rando
 
 // NewGrantID mints a random grant identifier.
 func NewGrantID() GrantID { return GrantID(encode(prefixGrant, randomBody())) }
+
+// NewInvitationID mints a random invitation identifier.
+func NewInvitationID() InvitationID { return InvitationID(encode(prefixInvitation, randomBody())) }
 
 // BridgeIDFromPublicKey derives a Bridge identity from its public identity key.
 // The same key always yields the same BridgeID, which is what makes owner
@@ -213,3 +224,6 @@ func (id GrantID) Validate() error     { return validate("grant id", prefixGrant
 func (id GameID) Validate() error      { return validate("game id", prefixGame, string(id)) }
 func (id FileID) Validate() error      { return validate("file id", prefixFile, string(id)) }
 func (id BridgeAlias) Validate() error { return validate("bridge alias", prefixAlias, string(id)) }
+func (id InvitationID) Validate() error {
+	return validate("invitation id", prefixInvitation, string(id))
+}

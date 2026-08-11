@@ -115,6 +115,14 @@ const (
 	EventRateLimited      EventKind = "rate.limited"
 )
 
+// Account, Swarm, and invitation lifecycle. ADR 0016.
+const (
+	EventUserRegistered   EventKind = "user.registered"
+	EventSwarmCreated     EventKind = "swarm.created"
+	EventInvitationIssued EventKind = "invitation.issued"
+	EventBridgeReenrolled EventKind = "bridge.reenrolled"
+)
+
 // eventSpec describes one member of the vocabulary.
 type eventSpec struct {
 	Retention Retention
@@ -174,6 +182,11 @@ var vocabulary = map[EventKind]eventSpec{
 	EventAdminAction:      {RetentionAudit, false, "an administrative change was made"},
 	EventAuthFailure:      {RetentionSecurity, false, "an authentication attempt failed"},
 	EventRateLimited:      {RetentionSecurity, false, "a caller exceeded a rate limit"},
+
+	EventUserRegistered:   {RetentionAudit, false, "a Host account was created"},
+	EventSwarmCreated:     {RetentionAudit, false, "a Swarm was created"},
+	EventInvitationIssued: {RetentionAudit, false, "a Swarm invitation was issued"},
+	EventBridgeReenrolled: {RetentionAudit, false, "an owner re-enrolled a revoked Bridge identity"},
 }
 
 // Known reports whether the kind is part of the vocabulary. The Host rejects

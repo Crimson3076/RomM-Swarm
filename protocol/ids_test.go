@@ -30,6 +30,23 @@ func TestIDPrefixesAreNotInterchangeable(t *testing.T) {
 	if err := BridgeID(u).Validate(); err == nil {
 		t.Fatal("a user id validated as a bridge id")
 	}
+	if err := InvitationID(u).Validate(); err == nil {
+		t.Fatal("a user id validated as an invitation id")
+	}
+}
+
+func TestInvitationIDsAreWellFormedAndUnique(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 500; i++ {
+		id := NewInvitationID()
+		if err := id.Validate(); err != nil {
+			t.Fatalf("minted invitation id failed validation: %v", err)
+		}
+		if seen[string(id)] {
+			t.Fatalf("minted a duplicate invitation id at iteration %d", i)
+		}
+		seen[string(id)] = true
+	}
 }
 
 func TestValidateRejectsMalformedIdentifiers(t *testing.T) {
