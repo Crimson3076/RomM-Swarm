@@ -5,8 +5,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/Crimson3076/RomM-Swarm/bridge/romm"
 	"github.com/Crimson3076/RomM-Swarm/protocol"
 )
 
@@ -19,6 +21,7 @@ type inboxData struct {
 	baseData
 	InboxConfigured bool
 	InboxFiles      []inboxFile
+	Platforms       []romm.Platform
 }
 
 func (s *Server) handleInboxPage(w http.ResponseWriter, r *http.Request) {
@@ -42,6 +45,13 @@ func (s *Server) handleInboxPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if conn := s.Backend.Connection(); conn != nil && conn.Platforms != nil {
+		data.Platforms = append(data.Platforms, conn.Platforms.All()...)
+		sort.Slice(data.Platforms, func(i, j int) bool { return data.Platforms[i].Name < data.Platforms[j].Name })
+	} else if data.Error == "" {
+		data.Error = "not connected to RomM — check Settings"
+	}
+
 	renderPage(w, "inbox", data)
 }
 
@@ -54,7 +64,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var localPath string
+	var localPath, displayName string
 	var cleanup func()
 
 	switch r.FormValue("source") {
@@ -93,6 +103,9 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		}
 		tmp.Close()
 		localPath = tmp.Name()
+		// RomM needs the file's real name, not the randomly-generated temp
+		// path it was staged under.
+		displayName = filepath.Base(header.Filename)
 		// This temp file is the Bridge's own, not the operator's — it is
 		// safe, and necessary, to remove once the import is done with it.
 		cleanup = func() { os.Remove(localPath) }
@@ -102,7 +115,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, err := s.Backend.StartImport(localPath, platform, protocol.DefaultIngestionTimeout, cleanup)
+	id, err := s.Backend.StartImport(localPath, platform, displayName, protocol.DefaultIngestionTimeout, cleanup)
 	if err != nil {
 		if cleanup != nil {
 			cleanup()

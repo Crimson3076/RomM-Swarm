@@ -32,10 +32,13 @@ type Backend interface {
 
 	// StartImport validates localPath against platformSlug and, if it
 	// checks out, runs the real receiving flow in the background,
-	// returning the TransferID immediately. cleanup, if non-nil, runs once
-	// the background import is done with localPath — see Daemon.StartImport
-	// for why this must never be used for a file the operator owns.
-	StartImport(localPath, platformSlug string, timeout time.Duration, cleanup func()) (protocol.TransferID, error)
+	// returning the TransferID immediately. displayName is the filename
+	// RomM will see; pass "" to derive it from localPath (correct for an
+	// inbox file, wrong for a Bridge-generated upload temp path — see
+	// Daemon.StartImport). cleanup, if non-nil, runs once the background
+	// import is done with localPath — see Daemon.StartImport for why this
+	// must never be used for a file the operator owns.
+	StartImport(localPath, platformSlug, displayName string, timeout time.Duration, cleanup func()) (protocol.TransferID, error)
 
 	// Journal is where import progress is recorded — used for the activity
 	// view.

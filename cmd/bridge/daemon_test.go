@@ -260,7 +260,7 @@ func TestPhase0_DaemonBootstrapsConnectsAndImports(t *testing.T) {
 		t.Fatalf("writing the fixture: %v", err)
 	}
 
-	id, err := d.StartImport(path, "gb", 30*time.Second, nil)
+	id, err := d.StartImport(path, "gb", "", 30*time.Second, nil)
 	if err != nil {
 		t.Fatalf("StartImport: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestStartImportFailsFastWithoutAConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDaemon: %v", err)
 	}
-	if _, err := d.StartImport("/does/not/matter", "gb", time.Minute, nil); err == nil {
+	if _, err := d.StartImport("/does/not/matter", "gb", "", time.Minute, nil); err == nil {
 		t.Fatal("StartImport succeeded with no RomM connection established")
 	}
 }
@@ -318,8 +318,65 @@ func TestStartImportRejectsAWrongPlatformFile(t *testing.T) {
 		t.Fatalf("writing the fixture: %v", err)
 	}
 
-	if _, err := d.StartImport(path, "gba", time.Minute, nil); err == nil {
+	if _, err := d.StartImport(path, "gba", "", time.Minute, nil); err == nil {
 		t.Fatal("StartImport accepted a Game Boy file declared as gba")
+	}
+}
+
+// TestStartImportUsesDisplayNameNotTheLocalTempPath is a regression test: a
+// browser upload stages its bytes under a Bridge-generated temp path (e.g.
+// "bridge-upload-1861139377.gb"), and RomM must still see the file's real
+// name — otherwise RomM can't parse or match it, even though the bytes
+// themselves import and play fine.
+func TestStartImportUsesDisplayNameNotTheLocalTempPath(t *testing.T) {
+	fb := newFakeBridgeServer()
+	srv := fb.start(t)
+
+	d, err := NewDaemon(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewDaemon: %v", err)
+	}
+	if err := d.ConfigStore().Save(bridgeconfig.Config{RommURL: srv.URL, RommToken: "t"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := d.Reconnect(context.Background()); err != nil {
+		t.Fatalf("Reconnect: %v", err)
+	}
+
+	payload := romfixture.GameBoy("DISPLAY NAME TEST", 65536, false)
+	// The on-disk path deliberately looks like a temp-upload path, distinct
+	// from the name RomM should end up seeing.
+	tempLikePath := filepath.Join(t.TempDir(), "bridge-upload-1861139377.gb")
+	if err := os.WriteFile(tempLikePath, payload, 0o644); err != nil {
+		t.Fatalf("writing the fixture: %v", err)
+	}
+
+	id, err := d.StartImport(tempLikePath, "gb", "Display Name Test.gb", 30*time.Second, nil)
+	if err != nil {
+		t.Fatalf("StartImport: %v", err)
+	}
+
+	deadline := time.Now().Add(15 * time.Second)
+	var state protocol.DestinationState
+	for time.Now().Before(deadline) {
+		var ok bool
+		state, ok = d.Journal().Current(id)
+		if ok && (state.Terminal() || state == protocol.StateSourceActive) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if state != protocol.StateSourceActive {
+		t.Fatalf("final state = %s, want source_active", state)
+	}
+
+	fb.mu.Lock()
+	defer fb.mu.Unlock()
+	if len(fb.roms) != 1 {
+		t.Fatalf("fake RomM recorded %d rom(s), want 1", len(fb.roms))
+	}
+	if got := fb.roms[0]["fs_name"]; got != "Display Name Test.gb" {
+		t.Fatalf("RomM saw filename %q, want the original display name, not the local temp path's name", got)
 	}
 }
 

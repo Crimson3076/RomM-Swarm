@@ -38,9 +38,10 @@ type fakeBackend struct {
 }
 
 type startImportCall struct {
-	LocalPath string
-	Platform  string
-	Cleanup   func()
+	LocalPath   string
+	Platform    string
+	DisplayName string
+	Cleanup     func()
 }
 
 func newFakeBackend(t *testing.T) *fakeBackend {
@@ -67,8 +68,8 @@ func (f *fakeBackend) Reconnect(ctx context.Context) error {
 	return nil
 }
 
-func (f *fakeBackend) StartImport(localPath, platformSlug string, timeout time.Duration, cleanup func()) (protocol.TransferID, error) {
-	f.startImportCalls = append(f.startImportCalls, startImportCall{LocalPath: localPath, Platform: platformSlug, Cleanup: cleanup})
+func (f *fakeBackend) StartImport(localPath, platformSlug, displayName string, timeout time.Duration, cleanup func()) (protocol.TransferID, error) {
+	f.startImportCalls = append(f.startImportCalls, startImportCall{LocalPath: localPath, Platform: platformSlug, DisplayName: displayName, Cleanup: cleanup})
 	if f.startImportErr != nil {
 		return "", f.startImportErr
 	}
@@ -303,7 +304,7 @@ func TestImportFromUploadCleansUpTheTempFileButInboxFilesAreNeverTouched(t *test
 	mw := multipart.NewWriter(&buf)
 	mw.WriteField("source", "upload")
 	mw.WriteField("platform", "gb")
-	part, _ := mw.CreateFormFile("file", "game.gb")
+	part, _ := mw.CreateFormFile("file", "Pokemon Ruby.gba")
 	part.Write([]byte("fake rom bytes"))
 	mw.Close()
 
@@ -322,6 +323,11 @@ func TestImportFromUploadCleansUpTheTempFileButInboxFilesAreNeverTouched(t *test
 	uploadedPath := backend.startImportCalls[0].LocalPath
 	if _, err := os.Stat(uploadedPath); !os.IsNotExist(err) {
 		t.Fatalf("the uploaded temp file %s was not cleaned up (err=%v)", uploadedPath, err)
+	}
+	// RomM must see the file's real name, not the randomly-generated temp
+	// path it was staged under.
+	if got := backend.startImportCalls[0].DisplayName; got != "Pokemon Ruby.gba" {
+		t.Fatalf("upload import passed display name %q, want the original filename", got)
 	}
 
 	// Inbox path: must never be deleted, even though the fake "completes"
@@ -345,6 +351,35 @@ func TestImportFromUploadCleansUpTheTempFileButInboxFilesAreNeverTouched(t *test
 	}
 	if _, err := os.Stat(inboxFile); err != nil {
 		t.Fatalf("an inbox file was deleted after import: %v", err)
+	}
+}
+
+// TestInboxPageListsAllConnectedRommPlatforms is a regression test: the
+// platform dropdowns must reflect every platform the connected RomM server
+// actually reports, not a hard-coded handful.
+func TestInboxPageListsAllConnectedRommPlatforms(t *testing.T) {
+	rommSrv := newMinimalFakeRomm(t)
+	conn, err := romm.ConnectAndResolvePlatforms(context.Background(), rommSrv.URL, "tok")
+	if err != nil {
+		t.Fatalf("ConnectAndResolvePlatforms: %v", err)
+	}
+
+	s, backend := loggedInServerWithBackend(t, rommSrv.URL, "tok")
+	backend.conn = conn
+
+	req := httptest.NewRequest(http.MethodGet, "/inbox", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: mustSessionToken(t, s)})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /inbox: status %d, body %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, slug := range []string{"gb", "gba", "gbc", "nds", "n64", "snes", "genesis", "psx"} {
+		if !strings.Contains(body, `value="`+slug+`"`) {
+			t.Errorf("inbox page is missing platform option %q: %s", slug, body)
+		}
 	}
 }
 
@@ -470,7 +505,19 @@ func newMinimalFakeRomm(t *testing.T) *httptest.Server {
 		writeTestJSON(w, map[string]any{"id": 1, "username": "tester", "role": "admin"})
 	})
 	mux.HandleFunc("/api/platforms", func(w http.ResponseWriter, r *http.Request) {
-		writeTestJSON(w, []map[string]any{{"id": 11, "slug": "gb", "name": "Game Boy"}})
+		// More than the old hard-coded 5-option dropdown covered, so a
+		// regression back to a hard-coded list would be caught here — RomM
+		// itself reports dozens of platforms on a real instance.
+		writeTestJSON(w, []map[string]any{
+			{"id": 11, "slug": "gb", "name": "Game Boy"},
+			{"id": 12, "slug": "gba", "name": "Game Boy Advance"},
+			{"id": 13, "slug": "gbc", "name": "Game Boy Color"},
+			{"id": 14, "slug": "nds", "name": "Nintendo DS"},
+			{"id": 15, "slug": "n64", "name": "Nintendo 64"},
+			{"id": 16, "slug": "snes", "name": "Super Nintendo Entertainment System"},
+			{"id": 17, "slug": "genesis", "name": "Sega Genesis"},
+			{"id": 18, "slug": "psx", "name": "PlayStation"},
+		})
 	})
 	mux.HandleFunc("/api/roms", func(w http.ResponseWriter, r *http.Request) {
 		writeTestJSON(w, map[string]any{"items": []any{}, "total": 0})

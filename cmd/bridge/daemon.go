@@ -110,7 +110,14 @@ func (d *Daemon) Reconnect(ctx context.Context) error {
 // localPath (success or failure) — for a file the Bridge itself staged
 // temporarily (a browser upload), never for a file the operator owns (an
 // inbox file), which must never be deleted out from under them.
-func (d *Daemon) StartImport(localPath, platformSlug string, timeout time.Duration, cleanup func()) (protocol.TransferID, error) {
+//
+// displayName is the filename RomM will see. It defaults to
+// filepath.Base(localPath) when empty, which is correct for an inbox file
+// (localPath is the real file) but wrong for a browser upload, whose
+// localPath is a Bridge-generated temp path — callers staging their own
+// temp file must pass the original filename explicitly so RomM receives a
+// name it can parse rather than a temp-file name.
+func (d *Daemon) StartImport(localPath, platformSlug, displayName string, timeout time.Duration, cleanup func()) (protocol.TransferID, error) {
 	conn := d.Connection()
 	if conn == nil {
 		return "", errors.New("bridge: not connected to a RomM server yet")
@@ -141,7 +148,11 @@ func (d *Daemon) StartImport(localPath, platformSlug string, timeout time.Durati
 		FileID:    protocol.FileIDFromCanonicalDigest(res.Canonical.SHA256),
 		Canonical: res.Canonical,
 	}
-	relativeDest := filepath.Join(platformSlug, filepath.Base(localPath))
+	name := displayName
+	if name == "" {
+		name = filepath.Base(localPath)
+	}
+	relativeDest := filepath.Join(platformSlug, filepath.Base(name))
 
 	library := &ingest.RommLibrary{Source: &scan.RommSource{Client: conn.Client, Report: conn.Report}}
 	flow := &ingest.Flow{

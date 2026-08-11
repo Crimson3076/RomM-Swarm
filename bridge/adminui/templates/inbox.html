@@ -21,11 +21,9 @@ This writes to your real RomM library.</p>
             <input type="hidden" name="path" value="{{.Name}}">
             <select name="platform" required>
               <option value="">choose platform</option>
-              <option value="gb">gb</option>
-              <option value="gbc">gbc</option>
-              <option value="gba">gba</option>
-              <option value="nds">nds</option>
-              <option value="genesis">genesis</option>
+              {{range $.Platforms}}
+              <option value="{{.Slug}}">{{.Name}} ({{.Slug}})</option>
+              {{end}}
             </select>
             <button type="submit">Import</button>
           </form>
@@ -54,11 +52,9 @@ This writes to your real RomM library.</p>
     <label for="upload_platform">Platform</label>
     <select id="upload_platform" name="platform" required>
       <option value="">choose platform</option>
-      <option value="gb">gb</option>
-      <option value="gbc">gbc</option>
-      <option value="gba">gba</option>
-      <option value="nds">nds</option>
-      <option value="genesis">genesis</option>
+      {{range .Platforms}}
+      <option value="{{.Slug}}">{{.Name}} ({{.Slug}})</option>
+      {{end}}
     </select>
     <button type="submit">Upload and import</button>
   </form>
