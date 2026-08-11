@@ -27,5 +27,41 @@ services:
       ROMM_URL: ${ROMM_URL:-}
       ROMM_TOKEN: ${ROMM_TOKEN:-}
 
+  # Network Host (ADR 0016, slice 1): accounts, Swarms, memberships,
+  # invitations, Bridge enrollment/rotation/revocation. Independent of the
+  # bridge service above — nothing here talks to a real cmd/bridge yet
+  # (see ADR 0016's "explicitly out of scope"). Complete /api/setup once
+  # this is up to create the owner account.
+  host:
+    build:
+      context: .
+      dockerfile: Dockerfile.host
+    image: romm-swarm-host:dev
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      HOST_LISTEN_ADDR: :8081
+      HOST_DATABASE_URL: postgres://host:${HOST_POSTGRES_PASSWORD:-host}@postgres:5432/host?sslmode=disable
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: host
+      POSTGRES_PASSWORD: ${HOST_POSTGRES_PASSWORD:-host}
+      POSTGRES_DB: host
+    volumes:
+      - host-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U host"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   bridge-data:
+  host-postgres-data:

@@ -1,0 +1,33 @@
+# syntax=docker/dockerfile:1
+
+# cmd/host is the only thing this image ships — the Network Host daemon
+# (ADR 0016, slice 1: identity, Swarms, invitations, Bridge enrollment).
+# Unlike the Bridge image (Dockerfile, at the repo root), this build is not
+# dependency-free — cmd/host pulls in github.com/jackc/pgx/v5 and
+# golang.org/x/crypto — so go.sum is a real, meaningful part of this build
+# and is cached normally rather than being incidental.
+
+FROM golang:1.24-alpine AS build
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/host ./cmd/host
+
+# Distroless, non-root: minimal attack surface for a process holding
+# password hashes and Bridge credential hashes. No shell, so HEALTHCHECK
+# below runs the binary's own `-healthcheck` mode instead of shelling out
+# to curl/wget. No /data volume here — all state lives in Postgres
+# (HOST_DATABASE_URL), unlike the Bridge image.
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/host /host
+
+EXPOSE 8081
+
+ENV HOST_LISTEN_ADDR=:8081
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["/host", "-healthcheck", "-addr", ":8081"]
+
+ENTRYPOINT ["/host"]

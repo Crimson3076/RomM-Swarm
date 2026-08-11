@@ -76,6 +76,17 @@ docker-run: docker-build
 		-e ROMM_TOKEN \
 		romm-swarm-bridge:dev
 
+.PHONY: docker-build-host
+docker-build-host:
+	docker build -f Dockerfile.host -t romm-swarm-host:dev .
+
+# Local click-around testing for the Host: needs Postgres too, so this uses
+# docker-compose rather than a bare `docker run` (unlike docker-run above,
+# which doesn't need any other service). Ctrl-C stops both.
+.PHONY: docker-run-host
+docker-run-host:
+	docker compose up --build host postgres
+
 .PHONY: clean
 clean:
 	rm -rf $(BIN) probe-out
