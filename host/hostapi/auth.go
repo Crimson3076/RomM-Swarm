@@ -64,7 +64,7 @@ type setupRequest struct {
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	var req setupRequest
 	if err := decodeJSON(r, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "could not read the request body")
+		writeJSONError(w, http.StatusBadRequest, "could not read the request body: "+err.Error())
 		return
 	}
 	if req.Username == "" || req.DisplayName == "" {
@@ -96,7 +96,7 @@ type loginRequest struct {
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
 	if err := decodeJSON(r, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "could not read the request body")
+		writeJSONError(w, http.StatusBadRequest, "could not read the request body: "+err.Error())
 		return
 	}
 	token, expiresAt, err := s.Directory.Authenticate(r.Context(), req.Username, req.Password)

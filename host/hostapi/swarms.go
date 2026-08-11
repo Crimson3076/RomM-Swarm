@@ -53,7 +53,7 @@ func (s *Server) handleIssueInvitation(w http.ResponseWriter, r *http.Request) {
 	var req issueInvitationRequest
 	if r.ContentLength != 0 {
 		if err := decodeJSON(r, &req); err != nil {
-			writeJSONError(w, http.StatusBadRequest, "could not read the request body")
+			writeJSONError(w, http.StatusBadRequest, "could not read the request body: "+err.Error())
 			return
 		}
 	}
