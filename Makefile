@@ -12,6 +12,7 @@ build:
 	$(GO) build -o $(BIN)/swarm-fixtures ./cmd/swarm-fixtures
 	$(GO) build -o $(BIN)/swarm-bridge ./cmd/swarm-bridge
 	$(GO) build -o $(BIN)/bridge ./cmd/bridge
+	$(GO) build -o $(BIN)/host ./cmd/host
 
 # Generate a sample library and catalogue, then classify it. Exercises the whole
 # verification pipeline by hand without touching a real collection.
