@@ -139,7 +139,18 @@ func (d *Directory) SetBridgePublishedDisplayName(ctx context.Context, bridge pr
 		_ = d.events.Record(ctx, protocol.Event{Kind: protocol.EventAuthFailure, At: d.now(), ActorBridge: bridge})
 		return err
 	}
+	if err := d.requireActiveMembership(ctx, bridge, swarm); err != nil {
+		return err
+	}
+	return d.applyBridgePublishedDisplayName(ctx, swarm, bridge, bridgeName)
+}
 
+// requireActiveMembership confirms bridge has an active (not disabled or
+// revoked) membership in swarm — the shared authorization check behind
+// every Bridge-facing, Swarm-scoped call that doesn't already do its own
+// membership lookup for another reason (PublishInventory needs the row's
+// alias_key too, so it keeps its own inline query rather than using this).
+func (d *Directory) requireActiveMembership(ctx context.Context, bridge protocol.BridgeID, swarm protocol.SwarmID) error {
 	var disabledAt, revokedAt sql.NullTime
 	err := d.DB.QueryRowContext(ctx, `
 		SELECT disabled_at, revoked_at FROM bridge_swarm_memberships
@@ -155,8 +166,7 @@ func (d *Directory) SetBridgePublishedDisplayName(ctx context.Context, bridge pr
 	if disabledAt.Valid || revokedAt.Valid {
 		return ErrBridgeNotEnrolledInSwarm
 	}
-
-	return d.applyBridgePublishedDisplayName(ctx, swarm, bridge, bridgeName)
+	return nil
 }
 
 // SwarmInventorySummary returns swarm-wide inventory arithmetic plus every

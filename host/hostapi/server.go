@@ -71,6 +71,7 @@ func (s *Server) routes() {
 	// refresh token in the body is the credential (ADR 0019).
 	mux.HandleFunc("POST /api/bridges/{bridgeID}/inventory", s.handlePublishInventory)
 	mux.HandleFunc("POST /api/bridges/{bridgeID}/display-name", s.handleSetBridgeDisplayName)
+	mux.HandleFunc("POST /api/bridges/{bridgeID}/reference-catalogues", s.handleGetReferenceCatalogues)
 
 	s.mux = mux
 }

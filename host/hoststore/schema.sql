@@ -130,6 +130,24 @@ CREATE TABLE IF NOT EXISTS inventory_items (
 );
 CREATE INDEX IF NOT EXISTS inventory_items_by_swarm_file ON inventory_items (swarm_id, file_id);
 
+-- ADR 0023: one reference catalogue per (Swarm, platform), uploaded by the
+-- Swarm owner through the Host UI and distributed to every joined Bridge.
+-- The Host is the sole authority here -- a Bridge cannot supply its own
+-- catalogue for a platform the Host has one for (see the ADR's precedence
+-- discussion), so there is exactly one row per platform per Swarm, not a
+-- history of uploads.
+CREATE TABLE IF NOT EXISTS swarm_reference_catalogues (
+    swarm_id       TEXT NOT NULL REFERENCES swarms(id),
+    platform       TEXT NOT NULL,
+    filename       TEXT NOT NULL,
+    dat_content    BYTEA NOT NULL,
+    content_sha256 TEXT NOT NULL,
+    entry_count    INTEGER NOT NULL,
+    uploaded_by    TEXT NOT NULL REFERENCES accounts(id),
+    uploaded_at    TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (swarm_id, platform)
+);
+
 -- No sweeper reads or deletes from this table yet; see the file comment.
 CREATE TABLE IF NOT EXISTS events (
     id           BIGSERIAL PRIMARY KEY,
