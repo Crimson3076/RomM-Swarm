@@ -42,6 +42,7 @@ point.
 | [0016](0016-network-host-identity-slice.md) | Network Host, slice 1: identity, Swarms, invitations, Bridge enrollment | no | Accepted |
 | [0017](0017-bridge-host-enrollment.md) | Bridge identity keys and Host enrollment over the network | no | Accepted |
 | [0018](0018-network-host-web-ui.md) | Network Host web UI | no | Accepted |
+| [0019](0019-inventory-publishing.md) | Bridge inventory publishing to the Host | no | Accepted |
 
 ## Phase 0 gate coverage
 
