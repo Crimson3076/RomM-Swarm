@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -11,10 +12,12 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Crimson3076/RomM-Swarm/host/directory"
 	"github.com/Crimson3076/RomM-Swarm/host/hoststore/hoststoretest"
 	"github.com/Crimson3076/RomM-Swarm/host/hostui"
+	"github.com/Crimson3076/RomM-Swarm/protocol"
 )
 
 func newTestServer(t *testing.T) (*httptest.Server, *directory.Directory) {
@@ -276,6 +279,100 @@ func TestPhase2_SwarmLifecycleCreateInviteRevokeReenroll(t *testing.T) {
 	body, _ = readAll(resp)
 	if !strings.Contains(body, "will not be shown again") {
 		t.Fatalf("reenroll page missing one-time warning: %s", body)
+	}
+}
+
+// testInventoryItem builds a minimal, verified-eligible Item — the same
+// shape host/hostapi's own inventory tests use — so a manifest built from
+// it passes protocol.Manifest.Validate().
+func testInventoryItem(seed string, platform protocol.PlatformID, size int64) protocol.Item {
+	sha := fmt.Sprintf("%064x", []byte(seed))
+	return protocol.Item{
+		FileID:         protocol.FileIDFromCanonicalDigest(sha),
+		Platform:       platform,
+		Canonical:      protocol.Digest{SHA256: sha, Size: size},
+		Classification: protocol.ClassVerifiedEligible,
+		Reference: &protocol.ReferenceMatch{
+			Family: "test-family", SetName: "test-set", SetVersion: "1",
+			EntryName: "Test Entry", CanonicalKey: "test-entry", Strength: protocol.StrengthStrong,
+		},
+		Adapter: protocol.AdapterRef{ID: "test-adapter", Version: "1"},
+	}
+}
+
+// TestPhase2_SwarmViewShowsInventoryTotalsAfterAPublish proves the Swarm
+// page's inventory stats (ADR 0019 Step 10) render real numbers once a
+// Bridge has actually published, and say so plainly beforehand.
+func TestPhase2_SwarmViewShowsInventoryTotalsAfterAPublish(t *testing.T) {
+	srv, dir := newTestServer(t)
+	client := newClient(t)
+
+	form := url.Values{
+		"username": {"owner"}, "display_name": {"The Owner"},
+		"password": {"a-long-enough-password"}, "password_confirm": {"a-long-enough-password"},
+	}
+	if _, err := client.PostForm(srv.URL+"/setup", form); err != nil {
+		t.Fatalf("POST /setup: %v", err)
+	}
+
+	resp, err := client.PostForm(srv.URL+"/swarms", url.Values{"name": {"Inventory Swarm"}})
+	if err != nil {
+		t.Fatalf("POST /swarms: %v", err)
+	}
+	swarmPath := resp.Header.Get("Location")
+
+	// Before any publish, the page says so rather than showing zeros that
+	// could be mistaken for "nothing was ever shared".
+	resp, err = client.Get(srv.URL + swarmPath)
+	if err != nil {
+		t.Fatalf("GET %s: %v", swarmPath, err)
+	}
+	body, _ := readAll(resp)
+	if !strings.Contains(body, "No Bridge has published its inventory") {
+		t.Fatalf("Swarm page before any publish did not say so: %s", body)
+	}
+
+	inviteResp, err := client.PostForm(srv.URL+swarmPath+"/invitations", nil)
+	if err != nil {
+		t.Fatalf("POST invitations: %v", err)
+	}
+	inviteBody, _ := readAll(inviteResp)
+	code := extractCodeDisplay(t, inviteBody)
+
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ed25519.GenerateKey: %v", err)
+	}
+	bridgeID, swarmID, alias, token, err := dir.RedeemInvitation(context.Background(), directory.InvitationCode(code), pub)
+	if err != nil {
+		t.Fatalf("RedeemInvitation: %v", err)
+	}
+
+	manifest := protocol.Manifest{
+		SchemaVersion: protocol.SchemaVersion,
+		Swarm:         swarmID,
+		Alias:         alias,
+		Revision:      1,
+		GeneratedAt:   time.Now().UTC(),
+		Items:         []protocol.Item{testInventoryItem("swarm-view-item", protocol.PlatformGB, 100)},
+	}
+	if _, err := dir.PublishInventory(context.Background(), bridgeID, token, manifest); err != nil {
+		t.Fatalf("PublishInventory: %v", err)
+	}
+
+	resp, err = client.Get(srv.URL + swarmPath)
+	if err != nil {
+		t.Fatalf("GET %s: %v", swarmPath, err)
+	}
+	body, _ = readAll(resp)
+	if strings.Contains(body, "No Bridge has published its inventory") {
+		t.Fatalf("Swarm page still says nothing was published, after a real publish: %s", body)
+	}
+	if !strings.Contains(body, "1 distinct file(s) across 1 published holding(s), 0 held by more than one Bridge") {
+		t.Fatalf("Swarm page did not show the correct inventory totals: %s", body)
+	}
+	if strings.Contains(body, "never") {
+		t.Fatalf("Swarm page's Bridge row still says never published: %s", body)
 	}
 }
 

@@ -28,10 +28,19 @@
 </div>
 
 <div class="card">
+  <h2>Inventory</h2>
+  {{if .InventoryTotalReplicas}}
+  <p>{{.InventoryDistinctFiles}} distinct file(s) across {{.InventoryTotalReplicas}} published holding(s), {{.InventoryDuplicatedFiles}} held by more than one Bridge.</p>
+  {{else}}
+  <p>No Bridge has published its inventory to this Swarm yet.</p>
+  {{end}}
+</div>
+
+<div class="card">
   <h2>Bridges</h2>
   {{if .Bridges}}
   <table class="table">
-    <thead><tr><th>Name</th><th>Bridge ID</th><th>Joined</th><th>State</th><th>Credential</th><th></th></tr></thead>
+    <thead><tr><th>Name</th><th>Bridge ID</th><th>Joined</th><th>State</th><th>Credential</th><th>Items</th><th>Last published</th><th></th></tr></thead>
     <tbody>
     {{range .Bridges}}
       <tr>
@@ -45,6 +54,8 @@
         <td>{{.JoinedAt}}</td>
         <td>{{.State}}</td>
         <td>{{if .CredentialRevoked}}<span class="status-bad">revoked</span>{{else}}<span class="status-ok">active</span>{{end}}</td>
+        <td>{{if .LastPublishedAt}}{{.ItemCount}}{{else}}&mdash;{{end}}</td>
+        <td>{{if .LastPublishedAt}}{{.LastPublishedAt}}{{else}}never{{end}}</td>
         <td>
           <form method="post" action="/swarms/{{$.Swarm.ID}}/bridges/{{.ID}}/revoke" class="form-inline">
             <button type="submit" class="link-button" onclick="return confirm('Revoke this Bridge’s credential? This revokes it across every Swarm it belongs to, not just this one.');">Revoke</button>

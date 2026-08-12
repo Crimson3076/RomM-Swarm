@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Crimson3076/RomM-Swarm/host/directory"
+	"github.com/Crimson3076/RomM-Swarm/host/hoststore"
 	"github.com/Crimson3076/RomM-Swarm/protocol"
 )
 
@@ -45,6 +46,14 @@ type swarmViewData struct {
 	Swarm       swarmSummary
 	Invitations []invitationSummary
 	Bridges     []bridgeSummary
+
+	// Inventory* fields are Swarm-wide totals (ADR 0019). Zero across the
+	// board is indistinguishable from "nothing published yet" — both are
+	// legitimately zero, and the page says so rather than implying a
+	// missing feature.
+	InventoryDistinctFiles   int
+	InventoryTotalReplicas   int
+	InventoryDuplicatedFiles int
 }
 
 type invitationSummary struct {
@@ -61,6 +70,12 @@ type bridgeSummary struct {
 	JoinedAt          string
 	State             string
 	CredentialRevoked bool
+
+	// ItemCount and LastPublishedAt reflect this Bridge's latest inventory
+	// snapshot for this Swarm (ADR 0019). LastPublishedAt is empty when
+	// this Bridge has never published.
+	ItemCount       int
+	LastPublishedAt string
 }
 
 func (s *Server) handleSwarmView(w http.ResponseWriter, r *http.Request) {
@@ -106,18 +121,35 @@ func (s *Server) loadSwarmView(w http.ResponseWriter, r *http.Request) (swarmVie
 		})
 	}
 
+	totals, snapshots, err := s.Directory.SwarmInventorySummary(r.Context(), swarmID)
+	if err != nil {
+		data.Error = "loading inventory: " + err.Error()
+	}
+	data.InventoryDistinctFiles = totals.DistinctFiles
+	data.InventoryTotalReplicas = totals.TotalReplicas
+	data.InventoryDuplicatedFiles = totals.DuplicatedFiles
+	snapshotByBridge := make(map[protocol.BridgeID]hoststore.InventorySnapshot, len(snapshots))
+	for _, snap := range snapshots {
+		snapshotByBridge[snap.BridgeID] = snap
+	}
+
 	bridges, err := s.Directory.ListBridgesForSwarm(r.Context(), swarmID)
 	if err != nil {
 		data.Error = "listing Bridges: " + err.Error()
 	}
 	for _, b := range bridges {
-		data.Bridges = append(data.Bridges, bridgeSummary{
+		summary := bridgeSummary{
 			ID:                string(b.BridgeID),
 			DisplayName:       b.DisplayName,
 			JoinedAt:          b.JoinedAt.Format(time.RFC3339),
 			State:             b.State,
 			CredentialRevoked: b.CredentialRevoked,
-		})
+		}
+		if snap, ok := snapshotByBridge[b.BridgeID]; ok {
+			summary.ItemCount = snap.ItemCount
+			summary.LastPublishedAt = snap.PublishedAt.Format(time.RFC3339)
+		}
+		data.Bridges = append(data.Bridges, summary)
 	}
 	return data, true
 }
