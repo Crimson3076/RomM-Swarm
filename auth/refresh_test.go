@@ -294,6 +294,64 @@ func TestAdministrativeRevocationStopsTheBridge(t *testing.T) {
 	}
 }
 
+// TestAuthenticateAcceptsOnlyTheCurrentTokenAndNeverMutates is ADR 0019's
+// proof for the new read-only check: it accepts the live token exactly
+// like Rotate's normal path would, rejects the previous token even inside
+// the grace window (unlike Rotate, which would recover through it), and —
+// the property that actually matters — never calls Store.Save, so the
+// FamilyState is byte-identical before and after every call, successful or
+// not.
+func TestAuthenticateAcceptsOnlyTheCurrentTokenAndNeverMutates(t *testing.T) {
+	h := newHarness(t)
+	current := h.storedToken()
+
+	before, ok := h.verifier.Store.Load(h.bridge)
+	if !ok {
+		t.Fatalf("the harness's own Bridge is not enrolled")
+	}
+
+	if err := h.verifier.Authenticate(h.bridge, current); err != nil {
+		t.Fatalf("Authenticate rejected the live current token: %v", err)
+	}
+	after, _ := h.verifier.Store.Load(h.bridge)
+	if after != before {
+		t.Fatalf("Authenticate mutated FamilyState: before %+v, after %+v", before, after)
+	}
+
+	// Rotate for real, so `current` is now the previous token, still
+	// inside the grace window Rotate itself would recover through.
+	if _, err := h.verifier.Rotate(h.bridge, current); err != nil {
+		t.Fatalf("rotation: %v", err)
+	}
+	stateAfterRotate, _ := h.verifier.Store.Load(h.bridge)
+
+	if err := h.verifier.Authenticate(h.bridge, current); !errors.Is(err, ErrUnknownToken) {
+		t.Fatalf("Authenticate accepted a previous/spent token: %v, want ErrUnknownToken (Authenticate has no grace-window recovery)", err)
+	}
+	stateAfterFailedAuth, _ := h.verifier.Store.Load(h.bridge)
+	if stateAfterFailedAuth != stateAfterRotate {
+		t.Fatalf("a failed Authenticate call mutated FamilyState: before %+v, after %+v", stateAfterRotate, stateAfterFailedAuth)
+	}
+
+	// A forged/unknown token.
+	if err := h.verifier.Authenticate(h.bridge, NewToken()); !errors.Is(err, ErrUnknownToken) {
+		t.Fatalf("Authenticate accepted a forged token: %v", err)
+	}
+
+	// A Bridge that never enrolled.
+	if err := h.verifier.Authenticate(bridgeID("never enrolled"), NewToken()); !errors.Is(err, ErrUnknownToken) {
+		t.Fatalf("Authenticate accepted a token for an unenrolled Bridge: %v", err)
+	}
+
+	// A revoked family.
+	if err := h.verifier.Revoke(h.bridge, "testing Authenticate against a revoked family"); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if err := h.verifier.Authenticate(h.bridge, current); !errors.Is(err, ErrFamilyRevoked) {
+		t.Fatalf("Authenticate accepted a token from a revoked family: %v, want ErrFamilyRevoked", err)
+	}
+}
+
 func TestRotationEventsAreDistinguishable(t *testing.T) {
 	h := newHarness(t)
 

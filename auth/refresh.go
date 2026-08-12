@@ -344,6 +344,37 @@ func (v *Verifier) Rotate(bridge protocol.BridgeID, presented Token) (Result, er
 	return Result{}, ErrUnknownToken
 }
 
+// Authenticate verifies that presented is the Bridge's current, live
+// refresh token, without consuming or rotating it. Unlike Rotate, this
+// never calls Store.Save and never mutates FamilyState — it exists for
+// calls that need to prove "this caller currently holds Bridge X's live
+// credential" without the rotation side effects Rotate's own protocol
+// requires. See ADR 0019, resolved sub-decision 1: reusing Rotate itself
+// for this would silently rotate the credential as an unrelated side
+// effect of every such call.
+//
+// Deliberately does not accept the previous-token grace-window recovery
+// path Rotate does — that path exists specifically to handle token
+// *consumption* (a Bridge that crashed before persisting a freshly-rotated
+// token), which has no meaning for a read-only check that never issues a
+// new token in the first place.
+func (v *Verifier) Authenticate(bridge protocol.BridgeID, presented Token) error {
+	state, ok := v.Store.Load(bridge)
+	if !ok {
+		return ErrUnknownToken
+	}
+	if state.Revoked {
+		return ErrFamilyRevoked
+	}
+	if state.BridgeID != bridge {
+		return ErrWrongBridge
+	}
+	if !equalHash(presented.Hash(), state.CurrentHash) {
+		return ErrUnknownToken
+	}
+	return nil
+}
+
 // revoke ends a family and returns the error to report.
 func (v *Verifier) revoke(state FamilyState, reason string) error {
 	state.Revoked = true
