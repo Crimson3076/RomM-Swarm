@@ -72,8 +72,15 @@ services:
   # Non-Alpine image deliberately: -race needs cgo, and golang:*-alpine has
   # no C toolchain installed, unlike the Debian-based image.
   # Usage: docker compose run --rm test
+  #
+  # profiles keeps this out of a plain `docker compose up`/`up --build` —
+  # without it, up would try to start this as a normal long-running
+  # service too, running the suite once and then sitting stopped.
+  # `docker compose run` targets a named service regardless of profiles,
+  # so the usage above is unaffected.
   test:
     image: golang:1.24
+    profiles: ["tools"]
     working_dir: /src
     depends_on:
       postgres:

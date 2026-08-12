@@ -87,6 +87,22 @@ docker-build-host:
 docker-run-host:
 	docker compose up --build host postgres
 
+# Rebuilds bridge and host from the current source and (re)starts every
+# long-running service in one shot — the one command to run after a
+# `git pull` so a stale image is never the reason something looks broken.
+# Detached (-d): unlike docker-run/docker-run-host, this doesn't tie up the
+# terminal. The test service is excluded (profiles: tools in
+# docker-compose.yml) — run `make docker-test` for that.
+.PHONY: docker-update
+docker-update:
+	docker compose up -d --build
+
+# Runs the whole Go test suite, including the Postgres-gated host/... tests,
+# in containers — no local Go toolchain or Postgres install required.
+.PHONY: docker-test
+docker-test:
+	docker compose run --rm test
+
 .PHONY: clean
 clean:
 	rm -rf $(BIN) probe-out
