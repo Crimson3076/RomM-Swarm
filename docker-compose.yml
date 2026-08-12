@@ -17,9 +17,6 @@ services:
       # page without a double-transfer through the browser. Point this at
       # wherever ROMs land before they're catalogued.
       - ${BRIDGE_INBOX_HOST_DIR:-./inbox}:/inbox:ro
-      # Optional: reference DAT files for the SWARM_REFERENCE_DAT_<PLATFORM>
-      # vars below to point at (e.g. SWARM_REFERENCE_DAT_GB=/reference-dats/gb.dat).
-      - ${BRIDGE_REFERENCE_DAT_HOST_DIR:-./reference-dats}:/reference-dats:ro
     environment:
       BRIDGE_CONFIG_DIR: /data
       BRIDGE_LISTEN_ADDR: :8080
@@ -33,17 +30,10 @@ services:
       # the admin UI's /swarm page — leave both unset to join manually.
       SWARM_HOST_URL: ${SWARM_HOST_URL:-}
       SWARM_INVITATION_CODE: ${SWARM_INVITATION_CODE:-}
-      # Optional reference DAT bootstrap (ADR 0019): a path to a Logiqx-style
-      # DAT file for each supported platform, loaded once at startup so
-      # inventory publishing has something to actually verify against.
-      # Point these at files mounted into the container (e.g. via the same
-      # ./inbox-style bind mount pattern) — leave any of them unset to skip
-      # loading a catalogue for that platform, which is also the default.
-      SWARM_REFERENCE_DAT_GB: ${SWARM_REFERENCE_DAT_GB:-}
-      SWARM_REFERENCE_DAT_GBC: ${SWARM_REFERENCE_DAT_GBC:-}
-      SWARM_REFERENCE_DAT_GBA: ${SWARM_REFERENCE_DAT_GBA:-}
-      SWARM_REFERENCE_DAT_NDS: ${SWARM_REFERENCE_DAT_NDS:-}
-      SWARM_REFERENCE_DAT_GENESIS: ${SWARM_REFERENCE_DAT_GENESIS:-}
+      # Reference catalogues are no longer configured on the Bridge at all
+      # (ADR 0023): the Swarm owner uploads them once through the Host's
+      # web UI, and every joined Bridge fetches the current set
+      # automatically before each publish attempt.
       # Optional tuning for a RomM server that isn't on the same local
       # network as this Bridge, where every list/download request is
       # markedly slower than the 30s/5min defaults assume. Raise either if

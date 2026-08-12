@@ -67,6 +67,8 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /swarms/{swarmID}/bridges/{bridgeID}/reenroll", s.requireBootstrappedAndAuth(s.handleReenrollBridge))
 	mux.HandleFunc("POST /swarms/{swarmID}/bridges/{bridgeID}/remove", s.requireBootstrappedAndAuth(s.handleRemoveBridge))
 	mux.HandleFunc("POST /swarms/{swarmID}/bridges/{bridgeID}/name", s.requireBootstrappedAndAuth(s.handleSetBridgeName))
+	mux.HandleFunc("POST /swarms/{swarmID}/reference-catalogues", s.requireBootstrappedAndAuth(s.handleUploadReferenceCatalogue))
+	mux.HandleFunc("POST /swarms/{swarmID}/reference-catalogues/{platform}/delete", s.requireBootstrappedAndAuth(s.handleDeleteReferenceCatalogue))
 
 	s.mux = mux
 }

@@ -42,6 +42,47 @@
 </div>
 
 <div class="card">
+  <h2>Reference catalogues</h2>
+  <p class="hint">A reference catalogue is what lets a Bridge tell a genuine,
+  verified copy of a game from a hack, a bad dump, or a mislabeled file.
+  Whatever you upload here is distributed to every Bridge in this Swarm
+  automatically before each publish — a Bridge cannot use its own
+  catalogue instead for a platform you've loaded one for.</p>
+  {{if .ReferenceCatalogues}}
+  <table class="table">
+    <thead><tr><th>Platform</th><th>File</th><th>Entries</th><th>Uploaded</th><th></th></tr></thead>
+    <tbody>
+    {{range .ReferenceCatalogues}}
+      <tr>
+        <td>{{.Platform}}</td>
+        <td>{{.Filename}}</td>
+        <td>{{.EntryCount}}</td>
+        <td>{{.UploadedAt}}</td>
+        <td>
+          <form method="post" action="/swarms/{{$.Swarm.ID}}/reference-catalogues/{{.Platform}}/delete" class="form-inline">
+            <button type="submit" class="link-button" onclick="return confirm('Remove the {{.Platform}} catalogue? Bridges will stop verifying anything on that platform until a new one is uploaded.');">Delete</button>
+          </form>
+        </td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p>No catalogues loaded yet — nothing published by a Bridge on any platform will verify until you upload one.</p>
+  {{end}}
+
+  <form method="post" action="/swarms/{{.Swarm.ID}}/reference-catalogues" enctype="multipart/form-data" class="form">
+    <label for="catalogue-platform">Platform</label>
+    <select id="catalogue-platform" name="platform">
+      {{range .UploadablePlatforms}}<option value="{{.}}">{{.}}</option>{{end}}
+    </select>
+    <label for="catalogue-file">Catalogue file (Logiqx/No-Intro-style DAT)</label>
+    <input type="file" id="catalogue-file" name="dat_file" accept=".dat,.xml" required>
+    <button type="submit">Upload</button>
+  </form>
+</div>
+
+<div class="card">
   <h2>Bridges</h2>
   {{if .Bridges}}
   <table class="table">

@@ -55,7 +55,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "bridge: %v\n", err)
 	}
 	cancelBootstrap()
-	d.BootstrapReferenceCatalogues()
 
 	cfg, err := d.ConfigStore().Load()
 	if err != nil && !errors.Is(err, bridgeconfig.ErrNotConfigured) {

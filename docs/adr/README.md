@@ -46,6 +46,7 @@ point.
 | [0020](0020-automatic-inventory-publishing.md) | Automatic inventory publishing | no | Accepted |
 | [0021](0021-persistent-publish-status.md) | Persistent, pollable inventory-publish status | no | Accepted |
 | [0022](0022-bridge-self-declared-display-name.md) | Bridge self-declared display name | no | Accepted |
+| [0023](0023-host-distributed-reference-catalogues.md) | Host-distributed reference catalogues | no | Accepted |
 
 ## Phase 0 gate coverage
 

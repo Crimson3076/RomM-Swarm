@@ -51,11 +51,14 @@ type Daemon struct {
 	swarmStore      *swarmconn.FileStore
 	credentialStore *auth.FileStore
 
-	// referenceSelections holds whatever reference catalogue has been
-	// loaded per platform (ADR 0019) — see inventory.go and bootstrap.go.
-	// Nil for a platform means no catalogue is loaded yet; scanHoldings
-	// reports every item on that platform as skipped rather than silently
-	// omitting it.
+	// referenceSelections holds whatever reference catalogue the Host
+	// currently serves per platform (ADR 0023) — replaced wholesale by
+	// refreshReferenceCatalogues (reference.go) at the start of every
+	// publish attempt, never merged. Nil for a platform means the Host
+	// has no catalogue loaded for it; scanHoldings reports every item on
+	// that platform as skipped rather than silently omitting it. Only
+	// ever read/written from within PublishInventory, so publishMu's
+	// exclusion is what makes this safe without its own lock.
 	referenceSelections map[protocol.PlatformID]*reference.Selection
 
 	// publishMu serializes every PublishInventory call — see its own doc

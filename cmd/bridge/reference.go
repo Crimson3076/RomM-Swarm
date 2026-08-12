@@ -1,54 +1,52 @@
 package main
 
 import (
-	"fmt"
-	"os"
-	"strings"
+	"bytes"
+	"context"
+	"log"
 
+	"github.com/Crimson3076/RomM-Swarm/auth"
+	"github.com/Crimson3076/RomM-Swarm/bridge/hostclient"
 	"github.com/Crimson3076/RomM-Swarm/protocol"
 	"github.com/Crimson3076/RomM-Swarm/reference"
 )
 
-// BootstrapReferenceCatalogues loads a Logiqx DAT per platform from
-// SWARM_REFERENCE_DAT_<PLATFORM> env vars (e.g. SWARM_REFERENCE_DAT_GB),
-// mirroring Bootstrap/BootstrapSwarm's own env-var convenience idiom
-// exactly: a one-time, non-fatal load at startup, no UI (ADR 0019). A
-// platform with no env var set, or one pointing at a path that can't be
-// read or parsed, is simply left with no Selection — scanHoldings then
-// reports every holding on it as skipped rather than silently guessing,
-// and PublishInventory surfaces that plainly.
+// refreshReferenceCatalogues fetches every reference catalogue currently
+// stored on the Host for swarm and replaces d.referenceSelections with
+// them wholesale (ADR 0023) — called once at the start of every publish
+// attempt, so an update the Swarm owner makes on the Host reaches this
+// Bridge on its own, without requiring it to leave and rejoin.
 //
-// Unlike Bootstrap/BootstrapSwarm, this has no "already configured, leave
-// it alone" guard: referenceSelections is in-memory only, so there is
-// nothing persisted to check against, and reloading the same env vars on
-// every restart is exactly the desired behavior.
-func (d *Daemon) BootstrapReferenceCatalogues() {
-	for _, platform := range protocol.InitialPlatforms() {
-		envVar := "SWARM_REFERENCE_DAT_" + strings.ToUpper(string(platform))
-		path := strings.TrimSpace(os.Getenv(envVar))
-		if path == "" {
-			continue
-		}
+// The Host is deliberately the sole authority here: earlier drafts of
+// this feature let a Bridge keep using its own locally-loaded catalogue
+// for a platform the Host hadn't covered yet, but that was dropped —
+// once a Bridge is joined to a Swarm, a self-supplied catalogue would let
+// its operator fabricate "verified" status for anything, defeating the
+// whole reason a reference catalogue exists. See ADR 0023.
+//
+// A failure to reach the Host (network blip, Host restart) is logged and
+// otherwise ignored — d.referenceSelections is left exactly as it was,
+// so a transient failure doesn't silently stop everything from verifying
+// for one publish cycle. It self-corrects on the next attempt.
+func (d *Daemon) refreshReferenceCatalogues(ctx context.Context, hostURL string, bridge protocol.BridgeID, refresh auth.Token, swarm protocol.SwarmID) {
+	catalogues, err := hostclient.New(hostURL).FetchReferenceCatalogues(ctx, bridge, refresh, swarm)
+	if err != nil {
+		log.Printf("bridge: fetching reference catalogues from the Host: %v", err)
+		return
+	}
 
-		selection, err := loadReferenceSelection(path, platform)
+	selections := make(map[protocol.PlatformID]*reference.Selection, len(catalogues))
+	for _, c := range catalogues {
+		set, err := reference.ImportDAT(bytes.NewReader(c.Content), reference.ImportOptions{Platform: c.Platform})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "bridge: %s: %v\n", envVar, err)
+			// The Host already validates a catalogue with the same parser
+			// before accepting an upload (Directory.UploadReferenceCatalogue),
+			// so this should be unreachable in practice — surfaced rather
+			// than silently dropped in case that ever changes.
+			log.Printf("bridge: parsing the %s reference catalogue from the Host: %v", c.Platform, err)
 			continue
 		}
-		d.referenceSelections[platform] = selection
+		selections[c.Platform] = reference.DefaultProfile().Apply(set)
 	}
-}
-
-func loadReferenceSelection(path string, platform protocol.PlatformID) (*reference.Selection, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("opening %s: %w", path, err)
-	}
-	defer f.Close()
-
-	set, err := reference.ImportDAT(f, reference.ImportOptions{Platform: platform})
-	if err != nil {
-		return nil, fmt.Errorf("parsing %s as a reference catalogue: %w", path, err)
-	}
-	return reference.DefaultProfile().Apply(set), nil
+	d.referenceSelections = selections
 }

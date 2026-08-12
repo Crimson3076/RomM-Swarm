@@ -2,6 +2,8 @@ package hostui
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -98,6 +100,21 @@ type swarmViewData struct {
 	InventoryDistinctFiles   int
 	InventoryTotalReplicas   int
 	InventoryDuplicatedFiles int
+
+	// ReferenceCatalogues and UploadablePlatforms back the "Reference
+	// catalogues" card (ADR 0023): what's currently loaded, and the full
+	// supported-platform list for the upload form's selector, in that
+	// fixed order rather than whatever ListReferenceCatalogues' SQL
+	// ordering happens to be.
+	ReferenceCatalogues []referenceCatalogueSummary
+	UploadablePlatforms []string
+}
+
+type referenceCatalogueSummary struct {
+	Platform   string
+	Filename   string
+	EntryCount int
+	UploadedAt string
 }
 
 type invitationSummary struct {
@@ -195,7 +212,84 @@ func (s *Server) loadSwarmView(w http.ResponseWriter, r *http.Request) (swarmVie
 		}
 		data.Bridges = append(data.Bridges, summary)
 	}
+
+	catalogues, err := s.Directory.ListReferenceCatalogues(r.Context(), userFromContext(r.Context()), swarmID)
+	if err != nil {
+		data.Error = "listing reference catalogues: " + err.Error()
+	}
+	for _, c := range catalogues {
+		data.ReferenceCatalogues = append(data.ReferenceCatalogues, referenceCatalogueSummary{
+			Platform:   string(c.Platform),
+			Filename:   c.Filename,
+			EntryCount: c.EntryCount,
+			UploadedAt: c.UploadedAt.Format(time.RFC3339),
+		})
+	}
+	for _, p := range protocol.InitialPlatforms() {
+		data.UploadablePlatforms = append(data.UploadablePlatforms, string(p))
+	}
+
 	return data, true
+}
+
+// maxReferenceCatalogueBytes bounds an uploaded DAT file — generous for a
+// Logiqx catalogue (reference.ImportDAT's own doc comment: "a few
+// megabytes at most"), while still refusing to buffer an unbounded upload
+// into memory.
+const maxReferenceCatalogueBytes = 32 << 20 // 32MiB
+
+// handleUploadReferenceCatalogue stores or replaces swarm's catalogue for
+// one platform (ADR 0023) — reference.ImportDAT validates the upload
+// before anything is stored, so a bad file is rejected here with a clear
+// error rather than silently failing on every Bridge's next fetch.
+func (s *Server) handleUploadReferenceCatalogue(w http.ResponseWriter, r *http.Request) {
+	swarmID := protocol.SwarmID(r.PathValue("swarmID"))
+	account := userFromContext(r.Context())
+
+	platform := protocol.PlatformID(r.FormValue("platform"))
+
+	file, header, err := r.FormFile("dat_file")
+	if err != nil {
+		s.swarmViewError(w, r, swarmID, "no file was uploaded: "+err.Error())
+		return
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(io.LimitReader(file, maxReferenceCatalogueBytes+1))
+	if err != nil {
+		s.swarmViewError(w, r, swarmID, "could not read the uploaded file: "+err.Error())
+		return
+	}
+	if len(content) > maxReferenceCatalogueBytes {
+		s.swarmViewError(w, r, swarmID, fmt.Sprintf("the uploaded file exceeds the %dMiB limit", maxReferenceCatalogueBytes>>20))
+		return
+	}
+
+	if err := s.Directory.UploadReferenceCatalogue(r.Context(), account, swarmID, platform, header.Filename, content); err != nil {
+		s.swarmViewError(w, r, swarmID, "could not upload the catalogue: "+err.Error())
+		return
+	}
+
+	data, ok := s.loadSwarmView(w, r)
+	if !ok {
+		return
+	}
+	data.Notice = "Reference catalogue uploaded."
+	renderPage(w, "swarm", data)
+}
+
+// handleDeleteReferenceCatalogue removes swarm's stored catalogue for one
+// platform, if any.
+func (s *Server) handleDeleteReferenceCatalogue(w http.ResponseWriter, r *http.Request) {
+	swarmID := protocol.SwarmID(r.PathValue("swarmID"))
+	platform := protocol.PlatformID(r.PathValue("platform"))
+	account := userFromContext(r.Context())
+
+	if err := s.Directory.DeleteReferenceCatalogue(r.Context(), account, swarmID, platform); err != nil {
+		s.swarmViewError(w, r, swarmID, "could not delete the catalogue: "+err.Error())
+		return
+	}
+	http.Redirect(w, r, "/swarms/"+string(swarmID), http.StatusSeeOther)
 }
 
 func (s *Server) handleIssueInvitation(w http.ResponseWriter, r *http.Request) {

@@ -119,6 +119,8 @@ func (d *Daemon) PublishInventory(ctx context.Context) (adminui.InventoryPublish
 		cfg = bridgeconfig.Config{}
 	}
 
+	d.refreshReferenceCatalogues(ctx, swarmCfg.HostURL, swarmCfg.BridgeID(), cred.Refresh, swarmCfg.SwarmID)
+
 	holdings, skipped, err := d.scanHoldings(ctx)
 	if err != nil {
 		d.finishPublishStatusError(err)

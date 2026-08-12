@@ -109,7 +109,14 @@ cross-Bridge stats, manually triggered, no scheduler.**
    Publishable()` is the one rule that actually matters for correctness,
    and it's still enforced.
 5. **A minimal, env-var-only `SWARM_REFERENCE_DAT_<PLATFORMID>` bootstrap
-   is included in this slice.** Mirrors `SWARM_HOST_URL`/
+   is included in this slice.** *(Superseded by
+   [ADR 0023](0023-host-distributed-reference-catalogues.md): the
+   env-var bootstrap described below was retired entirely once the Host
+   became the sole, authoritative distributor of reference catalogues —
+   a Bridge-local catalogue was found to be a real trust hole, since a
+   Bridge operator could otherwise fabricate "verified" status for
+   anything. Left here as historical record of what this slice actually
+   shipped.)* Mirrors `SWARM_HOST_URL`/
    `SWARM_INVITATION_CODE`'s existing convenience idiom exactly: read once
    at startup, non-fatal on a bad or missing path, no UI. Loads a DAT via
    `reference.ImportDAT` + `reference.DefaultProfile().Apply` into an

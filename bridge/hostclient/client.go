@@ -335,6 +335,86 @@ func (c *Client) SetDisplayName(ctx context.Context, bridge protocol.BridgeID, r
 	}
 }
 
+type getReferenceCataloguesRequest struct {
+	RefreshToken string `json:"refresh_token"`
+	SwarmID      string `json:"swarm_id"`
+}
+
+type referenceCatalogueWire struct {
+	Platform      string `json:"platform"`
+	Filename      string `json:"filename"`
+	ContentBase64 string `json:"content_base64"`
+	ContentSHA256 string `json:"content_sha256"`
+	EntryCount    int    `json:"entry_count"`
+}
+
+// FetchedCatalogue is one reference catalogue as the Host currently holds
+// it for a Swarm.
+type FetchedCatalogue struct {
+	Platform      protocol.PlatformID
+	Filename      string
+	Content       []byte
+	ContentSHA256 string
+	EntryCount    int
+}
+
+// FetchReferenceCatalogues asks the Host for every reference catalogue
+// currently stored for swarm (ADR 0023) — the Host is the sole authority
+// for verification, so this always returns the complete current set, not
+// a delta; a caller replaces whatever it had wholesale. Matches
+// host/hostapi.handleGetReferenceCatalogues's exact contract: POST
+// /api/bridges/{id}/reference-catalogues, {refresh_token, swarm_id} in,
+// {catalogues: [...]} out.
+func (c *Client) FetchReferenceCatalogues(ctx context.Context, bridge protocol.BridgeID, refresh auth.Token, swarm protocol.SwarmID) ([]FetchedCatalogue, error) {
+	body, err := json.Marshal(getReferenceCataloguesRequest{RefreshToken: string(refresh), SwarmID: string(swarm)})
+	if err != nil {
+		return nil, fmt.Errorf("hostclient: encoding reference catalogues request: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, c.timeout())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/bridges/"+string(bridge)+"/reference-catalogues", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("hostclient: building reference catalogues request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("hostclient: calling reference catalogues: %w", err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var out struct {
+			Catalogues []referenceCatalogueWire `json:"catalogues"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			return nil, fmt.Errorf("hostclient: decoding reference catalogues response: %w", err)
+		}
+		catalogues := make([]FetchedCatalogue, 0, len(out.Catalogues))
+		for _, w := range out.Catalogues {
+			content, err := base64.StdEncoding.DecodeString(w.ContentBase64)
+			if err != nil {
+				return nil, fmt.Errorf("hostclient: decoding %s catalogue content: %w", w.Platform, err)
+			}
+			catalogues = append(catalogues, FetchedCatalogue{
+				Platform:      protocol.PlatformID(w.Platform),
+				Filename:      w.Filename,
+				Content:       content,
+				ContentSHA256: w.ContentSHA256,
+				EntryCount:    w.EntryCount,
+			})
+		}
+		return catalogues, nil
+	case http.StatusUnauthorized:
+		return nil, auth.ErrUnknownToken
+	default:
+		return nil, fmt.Errorf("hostclient: fetching reference catalogues failed: %s", responseErrorMessage(resp))
+	}
+}
+
 type errorBody struct {
 	Error string `json:"error"`
 }
