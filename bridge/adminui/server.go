@@ -61,6 +61,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /swarm", s.requireConfiguredAndAuth(s.handleSwarmJoin))
 	mux.HandleFunc("POST /api/swarm/test", s.requireConfiguredAndAuth(s.handleSwarmTest))
 	mux.HandleFunc("POST /api/swarm/publish-inventory", s.requireConfiguredAndAuth(s.handlePublishInventory))
+	mux.HandleFunc("GET /api/swarm/publish-status", s.requireConfiguredAndAuth(s.handlePublishStatus))
 
 	mux.HandleFunc("GET /library", s.requireConfiguredAndAuth(s.handleLibraryPage))
 	mux.HandleFunc("GET /api/library/items", s.requireConfiguredAndAuth(s.handleLibraryItems))

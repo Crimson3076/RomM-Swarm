@@ -22,7 +22,30 @@
   <p class="hint">Never published.</p>
   {{end}}
   <button type="button" id="publish-inventory">Publish Inventory</button>
-  <span id="publish-inventory-result"></span>
+  <!--
+    Rendered server-side from the live PublishStatus on every load, so a
+    reload mid-scan shows the real current state immediately rather than
+    an empty button with no way to tell "still working" from "hung".
+    static/swarm.js polls /api/swarm/publish-status to keep this live
+    without a reload while running is true.
+  -->
+  <div id="publish-status" data-running="{{.PublishRunning}}">
+    {{if .PublishRunning}}
+      <p id="publish-status-text">
+        {{if eq .PublishPhase "scanning"}}
+          Scanning{{if .PublishPlatform}} {{.PublishPlatform}} (platform {{.PublishPlatformIndex}} of {{.PublishPlatformTotal}}){{end}} — {{.PublishItemsScanned}} item(s) scanned so far…
+        {{else}}
+          Publishing to the Host…
+        {{end}}
+      </p>
+    {{else if eq .PublishPhase "error"}}
+      <p id="publish-status-text" class="status-bad">{{.PublishError}}</p>
+    {{else if eq .PublishPhase "done"}}
+      <p id="publish-status-text" class="status-ok">{{.PublishSummary}}</p>
+    {{else}}
+      <p id="publish-status-text"></p>
+    {{end}}
+  </div>
 </div>
 {{end}}
 

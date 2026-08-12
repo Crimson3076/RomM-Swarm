@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -52,6 +54,15 @@ type fakeBackend struct {
 	publishInventoryResult InventoryPublishResult
 	publishInventoryErr    error
 	publishInventoryCalls  int
+	// publishInventoryDelay, when set, is slept through before
+	// PublishInventory resolves — lets a test observe the "running"
+	// window (via PublishStatus) rather than only ever seeing the
+	// instantly-finished state.
+	publishInventoryDelay time.Duration
+
+	publishStatusMu   sync.Mutex
+	publishStatus     PublishStatus
+	publishTriggering atomic.Bool
 
 	library        []scan.ROMRecord
 	libraryErr     error
@@ -139,10 +150,41 @@ func (f *fakeBackend) TestSwarmConnection(ctx context.Context) (auth.Result, err
 
 func (f *fakeBackend) PublishInventory(ctx context.Context) (InventoryPublishResult, error) {
 	f.publishInventoryCalls++
+	f.publishStatusMu.Lock()
+	f.publishStatus = PublishStatus{Phase: PublishPhaseScanning, StartedAt: time.Now()}
+	f.publishStatusMu.Unlock()
+
+	if f.publishInventoryDelay > 0 {
+		time.Sleep(f.publishInventoryDelay)
+	}
+
+	f.publishStatusMu.Lock()
+	defer f.publishStatusMu.Unlock()
 	if f.publishInventoryErr != nil {
+		f.publishStatus = PublishStatus{Phase: PublishPhaseError, Err: f.publishInventoryErr.Error(), FinishedAt: time.Now()}
 		return InventoryPublishResult{}, f.publishInventoryErr
 	}
+	f.publishStatus = PublishStatus{Phase: PublishPhaseDone, Result: f.publishInventoryResult, FinishedAt: time.Now()}
 	return f.publishInventoryResult, nil
+}
+
+func (f *fakeBackend) PublishStatus() PublishStatus {
+	f.publishStatusMu.Lock()
+	defer f.publishStatusMu.Unlock()
+	return f.publishStatus
+}
+
+func (f *fakeBackend) TriggerPublishInventory() PublishStatus {
+	if f.publishTriggering.CompareAndSwap(false, true) {
+		f.publishStatusMu.Lock()
+		f.publishStatus = PublishStatus{Phase: PublishPhaseScanning, StartedAt: time.Now()}
+		f.publishStatusMu.Unlock()
+		go func() {
+			defer f.publishTriggering.Store(false)
+			f.PublishInventory(context.Background())
+		}()
+	}
+	return f.PublishStatus()
 }
 
 func (f *fakeBackend) Library(ctx context.Context, forceRefresh bool) ([]scan.ROMRecord, error) {
@@ -451,10 +493,13 @@ func TestPublishInventoryButtonPostsAndTheNewRevisionRendersOnThePage(t *testing
 		respBody, _ := io.ReadAll(resp.Body)
 		t.Fatalf("POST /api/swarm/publish-inventory: status %d, body %s", resp.StatusCode, respBody)
 	}
-	var parsed map[string]any
-	json.NewDecoder(resp.Body).Decode(&parsed)
-	if parsed["published"] != true || parsed["item_count"] != float64(3) || parsed["distinct_files"] != float64(5) || parsed["revision"] != float64(2) {
-		t.Fatalf("publish-inventory body = %v, want published:true item_count:3 distinct_files:5 revision:2", parsed)
+	// The button no longer waits for the publish to finish — it starts it
+	// in the background and returns whatever the current status is right
+	// away. Poll the status endpoint for the real outcome.
+	parsed := waitForPublishDone(t, s, jar)
+	result, _ := parsed["result"].(map[string]any)
+	if result["published"] != true || result["item_count"] != float64(3) || result["distinct_files"] != float64(5) || result["revision"] != float64(2) {
+		t.Fatalf("publish status result = %v, want published:true item_count:3 distinct_files:5 revision:2", result)
 	}
 	if backend.publishInventoryCalls != 1 {
 		t.Fatalf("PublishInventory was called %d times, want 1", backend.publishInventoryCalls)
@@ -502,14 +547,145 @@ func TestPublishInventoryWithNothingToPublishIsAClearMessageNotA500(t *testing.T
 		respBody, _ := io.ReadAll(resp.Body)
 		t.Fatalf("POST /api/swarm/publish-inventory with nothing to publish: status %d, body %s", resp.StatusCode, respBody)
 	}
-	var parsed map[string]any
-	json.NewDecoder(resp.Body).Decode(&parsed)
-	if parsed["published"] != false {
-		t.Fatalf("publish-inventory body = %v, want published:false", parsed)
+	parsed := waitForPublishDone(t, s, jar)
+	result, _ := parsed["result"].(map[string]any)
+	if result["published"] != false {
+		t.Fatalf("publish status result = %v, want published:false", result)
 	}
-	reasons, _ := parsed["skip_reasons"].(map[string]any)
+	reasons, _ := result["skip_reasons"].(map[string]any)
 	if len(reasons) == 0 {
-		t.Fatalf("publish-inventory body did not carry skip_reasons: %v", parsed)
+		t.Fatalf("publish status result did not carry skip_reasons: %v", result)
+	}
+}
+
+// waitForPublishDone polls GET /api/swarm/publish-status until running is
+// false, then returns the decoded body — the async publish contract means
+// a caller can no longer assume the POST that started it already carried
+// the final outcome.
+func waitForPublishDone(t *testing.T, s *Server, jar http.CookieJar) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		resp := doRequest(t, s, jar, http.MethodGet, "/api/swarm/publish-status", nil)
+		var parsed map[string]any
+		json.NewDecoder(resp.Body).Decode(&parsed)
+		if parsed["running"] == false {
+			return parsed
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for the publish to finish")
+	return nil
+}
+
+// loggedInSwarmReadyServer sets up a server past login, joined to a Swarm,
+// with a delayed fake publish so tests can observe the "running" window
+// instead of only ever seeing the instantly-finished state.
+func loggedInSwarmReadyServer(t *testing.T, delay time.Duration) (*Server, *fakeBackend, http.CookieJar) {
+	t.Helper()
+	s, backend := newTestServer(t)
+	hash, err := hashPassword("pw")
+	if err != nil {
+		t.Fatalf("hashPassword: %v", err)
+	}
+	if err := backend.store.Save(bridgeconfig.Config{RommURL: "https://x", RommToken: "t", AdminPasswordHash: hash}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	jar := newJar(t)
+	if resp := doRequest(t, s, jar, http.MethodPost, "/login", url.Values{"password": {"pw"}}); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("login: status %d", resp.StatusCode)
+	}
+	backend.swarmStatus = SwarmStatus{Joined: true, HostURL: "https://host.example.com", BridgeID: "brg_test0000000000000000000000000"}
+	backend.publishInventoryDelay = delay
+	return s, backend, jar
+}
+
+// TestPublishStatusEndpointReportsRunningWhileInProgress is the direct
+// proof for the reported problem: while a publish is genuinely still
+// working, the status endpoint must say so plainly (running:true), not
+// leave the operator guessing whether it's hung.
+func TestPublishStatusEndpointReportsRunningWhileInProgress(t *testing.T) {
+	s, backend, jar := loggedInSwarmReadyServer(t, 300*time.Millisecond)
+	backend.publishInventoryResult = InventoryPublishResult{Published: true, ItemCount: 1, Revision: 1}
+
+	resp := doRequest(t, s, jar, http.MethodPost, "/api/swarm/publish-inventory", url.Values{})
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST /api/swarm/publish-inventory: status %d, body %s", resp.StatusCode, body)
+	}
+	var started map[string]any
+	json.NewDecoder(resp.Body).Decode(&started)
+	if started["running"] != true {
+		t.Fatalf("immediately after starting a publish, running = %v, want true", started["running"])
+	}
+
+	statusResp := doRequest(t, s, jar, http.MethodGet, "/api/swarm/publish-status", nil)
+	var status map[string]any
+	json.NewDecoder(statusResp.Body).Decode(&status)
+	if status["running"] != true {
+		t.Fatalf("GET /api/swarm/publish-status mid-flight: running = %v, want true", status["running"])
+	}
+
+	final := waitForPublishDone(t, s, jar)
+	result, _ := final["result"].(map[string]any)
+	if result["published"] != true || result["item_count"] != float64(1) {
+		t.Fatalf("final publish status result = %v, want published:true item_count:1", result)
+	}
+}
+
+// TestPublishInventoryButtonDoesNotStackRunsWhileOneIsInProgress proves
+// clicking the button again while a publish is already running doesn't
+// queue up a redundant second scan.
+func TestPublishInventoryButtonDoesNotStackRunsWhileOneIsInProgress(t *testing.T) {
+	s, backend, jar := loggedInSwarmReadyServer(t, 300*time.Millisecond)
+	backend.publishInventoryResult = InventoryPublishResult{Published: true, ItemCount: 1, Revision: 1}
+
+	first := doRequest(t, s, jar, http.MethodPost, "/api/swarm/publish-inventory", url.Values{})
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("first POST /api/swarm/publish-inventory: status %d", first.StatusCode)
+	}
+	second := doRequest(t, s, jar, http.MethodPost, "/api/swarm/publish-inventory", url.Values{})
+	if second.StatusCode != http.StatusOK {
+		t.Fatalf("second POST /api/swarm/publish-inventory: status %d", second.StatusCode)
+	}
+
+	waitForPublishDone(t, s, jar)
+
+	if backend.publishInventoryCalls != 1 {
+		t.Fatalf("PublishInventory was called %d time(s) across two overlapping button clicks, want exactly 1", backend.publishInventoryCalls)
+	}
+}
+
+// TestSwarmPageRendersLiveStatusServerSideOnReload proves the status is
+// real server-side state, not something only the JS remembers — a page
+// reload mid-publish must show the current phase immediately, without
+// waiting for a poll to land.
+func TestSwarmPageRendersLiveStatusServerSideOnReload(t *testing.T) {
+	s, backend, jar := loggedInSwarmReadyServer(t, 300*time.Millisecond)
+	backend.publishInventoryResult = InventoryPublishResult{Published: true, ItemCount: 1, Revision: 1}
+
+	if resp := doRequest(t, s, jar, http.MethodPost, "/api/swarm/publish-inventory", url.Values{}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /api/swarm/publish-inventory: status %d", resp.StatusCode)
+	}
+
+	page := doRequest(t, s, jar, http.MethodGet, "/swarm", nil)
+	body, _ := io.ReadAll(page.Body)
+	if !strings.Contains(string(body), `data-running="true"`) {
+		t.Fatalf("reloaded Swarm page did not show running=true mid-publish: %s", body)
+	}
+	if !strings.Contains(string(body), "Scanning") {
+		t.Fatalf("reloaded Swarm page did not show the scanning status text: %s", body)
+	}
+
+	waitForPublishDone(t, s, jar)
+
+	after := doRequest(t, s, jar, http.MethodGet, "/swarm", nil)
+	afterBody, _ := io.ReadAll(after.Body)
+	if !strings.Contains(string(afterBody), `data-running="false"`) {
+		t.Fatalf("Swarm page after completion still shows running=true: %s", afterBody)
+	}
+	if !strings.Contains(string(afterBody), "Published revision 1") {
+		t.Fatalf("Swarm page after completion did not show the outcome: %s", afterBody)
 	}
 }
 

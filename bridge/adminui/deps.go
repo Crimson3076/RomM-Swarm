@@ -61,9 +61,25 @@ type Backend interface {
 	TestSwarmConnection(ctx context.Context) (auth.Result, error)
 
 	// PublishInventory scans local holdings, builds this Swarm's manifest,
-	// and sends it to the Host — the manual, operator-triggered action
-	// behind the Swarm page's "Publish Inventory" button (ADR 0019).
+	// and sends it to the Host (ADR 0019), called automatically (ADR 0020)
+	// as well as via TriggerPublishInventory below. Blocks until finished
+	// — callers that want to observe progress rather than wait should use
+	// TriggerPublishInventory instead of calling this directly.
 	PublishInventory(ctx context.Context) (InventoryPublishResult, error)
+
+	// TriggerPublishInventory starts PublishInventory in the background if
+	// nothing is already running, and returns the resulting PublishStatus
+	// immediately either way — the manual, operator-triggered action
+	// behind the Swarm page's "Publish Inventory" button. Never blocks on
+	// the publish itself finishing.
+	TriggerPublishInventory() PublishStatus
+
+	// PublishStatus reports the live progress of whatever PublishInventory
+	// call is currently running (scanning/publishing), plus the outcome of
+	// the most recently finished one — persists in memory across page
+	// reloads, since an operator with no other way to tell a publish apart
+	// from a hang needs to be able to check back without losing state.
+	PublishStatus() PublishStatus
 
 	// Library returns RomM's full inventory listing, from an internal
 	// cache when forceRefresh is false and the cache is still fresh — the
@@ -110,4 +126,64 @@ type InventoryPublishResult struct {
 	// SkipReasons counts why holdings weren't published, one entry per
 	// distinct reason — populated only when Published is false.
 	SkipReasons map[string]int
+}
+
+// PublishPhase is where a publish attempt currently stands.
+type PublishPhase string
+
+const (
+	// PublishPhaseIdle means no publish has ever run in this process.
+	PublishPhaseIdle PublishPhase = "idle"
+	// PublishPhaseScanning means Daemon.scanHoldings is running — the slow
+	// part, since it downloads and hashes every held item.
+	PublishPhaseScanning PublishPhase = "scanning"
+	// PublishPhasePublishing means the scan finished and the manifest is
+	// in flight to the Host.
+	PublishPhasePublishing PublishPhase = "publishing"
+	// PublishPhaseDone means the most recent attempt finished without
+	// error — Result holds its outcome, including the "nothing to
+	// publish" case (Result.Published false is not an error).
+	PublishPhaseDone PublishPhase = "done"
+	// PublishPhaseError means the most recent attempt failed — Err holds
+	// why.
+	PublishPhaseError PublishPhase = "error"
+)
+
+// PublishStatus is a live snapshot of Bridge inventory publishing:
+// whichever attempt is currently running, if any, plus the outcome of the
+// last one that finished. Defined here, not in cmd/bridge, for the same
+// reason SwarmStatus is: a Backend method's return type must be visible to
+// this package, and this package cannot import package main.
+type PublishStatus struct {
+	Phase PublishPhase
+
+	// Platform, PlatformIndex, and PlatformTotal describe scan progress:
+	// which of the Bridge's fixed, known platform list is currently being
+	// scanned, out of how many. ItemsScanned is a running total across
+	// every platform scanned so far in this attempt. All four are only
+	// meaningful while Phase is PublishPhaseScanning; they hold their last
+	// values afterward, not reset to zero, since "platform 5 of 5, 812
+	// items scanned" is still useful context once a run finishes.
+	Platform      protocol.PlatformID
+	PlatformIndex int
+	PlatformTotal int
+	ItemsScanned  int
+
+	// StartedAt is when the current (or, once finished, the most recent)
+	// attempt began. FinishedAt is zero while Phase is scanning or
+	// publishing.
+	StartedAt  time.Time
+	FinishedAt time.Time
+
+	// Result and Err hold the most recently finished attempt's outcome —
+	// left untouched (not cleared) while a new attempt is in progress, so
+	// the UI keeps showing the last known outcome instead of flashing back
+	// to empty the moment a new scan starts.
+	Result InventoryPublishResult
+	Err    string
+}
+
+// Running reports whether a publish attempt is currently in progress.
+func (s PublishStatus) Running() bool {
+	return s.Phase == PublishPhaseScanning || s.Phase == PublishPhasePublishing
 }

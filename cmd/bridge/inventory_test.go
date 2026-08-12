@@ -280,3 +280,54 @@ func TestPhase2_PublishInventoryFailsFastWithoutJoiningASwarm(t *testing.T) {
 		t.Fatal("PublishInventory succeeded despite never having joined a Swarm")
 	}
 }
+
+// waitForDaemonPublishDone polls PublishStatus until it stops running,
+// the same deadline-poll pattern used throughout this package's tests.
+func waitForDaemonPublishDone(t *testing.T, d *Daemon) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !d.PublishStatus().Running() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for the triggered publish to finish")
+}
+
+// TestPhase2_TriggerPublishInventoryReportsRunningImmediately is the
+// direct proof TriggerPublishInventory closes the race a naive
+// "if !Running() { go PublishInventory() }" in an HTTP handler would
+// leave open: its own return value, synchronous with the call that
+// started the publish, must already say running — not "idle" until a
+// goroutine gets around to running.
+func TestPhase2_TriggerPublishInventoryReportsRunningImmediately(t *testing.T) {
+	d, _ := setUpPublishableDaemon(t)
+
+	status := d.TriggerPublishInventory()
+	if !status.Running() {
+		t.Fatalf("TriggerPublishInventory's own return value has Running() = false immediately after triggering, want true")
+	}
+
+	waitForDaemonPublishDone(t, d)
+}
+
+// TestPhase2_TriggerPublishInventoryDoesNotStackConcurrentCalls proves
+// three overlapping triggers (an impatient operator clicking the button
+// repeatedly) produce exactly one real publish, not three redundant
+// back-to-back rescans.
+func TestPhase2_TriggerPublishInventoryDoesNotStackConcurrentCalls(t *testing.T) {
+	d, host := setUpPublishableDaemon(t)
+
+	d.TriggerPublishInventory()
+	d.TriggerPublishInventory()
+	d.TriggerPublishInventory()
+
+	waitForDaemonPublishDone(t, d)
+
+	host.mu.Lock()
+	defer host.mu.Unlock()
+	if host.receivedCount != 1 {
+		t.Fatalf("the fake Host received %d publish call(s) across 3 overlapping triggers, want exactly 1", host.receivedCount)
+	}
+}

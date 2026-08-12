@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Crimson3076/RomM-Swarm/auth"
+	"github.com/Crimson3076/RomM-Swarm/bridge/adminui"
 	"github.com/Crimson3076/RomM-Swarm/bridge/bridgeconfig"
 	"github.com/Crimson3076/RomM-Swarm/bridge/destination"
 	"github.com/Crimson3076/RomM-Swarm/bridge/ingest"
@@ -66,6 +67,17 @@ type Daemon struct {
 	libraryMu       sync.Mutex
 	libraryCache    []scan.ROMRecord
 	libraryCachedAt time.Time
+
+	// statusMu guards status — see inventory.go's PublishInventory. A
+	// separate mutex from publishMu deliberately: a status poll must never
+	// block behind a multi-minute publish in progress, only behind the
+	// brief moment another poll or update is touching the struct itself.
+	statusMu sync.Mutex
+	status   adminui.PublishStatus
+
+	// publishTriggering guards TriggerPublishInventory — see its own doc
+	// comment for the race it closes.
+	publishTriggering atomic.Bool
 
 	conn atomic.Pointer[romm.Connection]
 }

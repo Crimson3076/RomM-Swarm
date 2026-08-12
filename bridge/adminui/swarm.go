@@ -3,6 +3,7 @@ package adminui
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -17,10 +18,28 @@ type swarmPageData struct {
 	LastRotated string
 
 	// LastPublishedRevision and LastPublishedAt report this Bridge's most
-	// recent successful inventory publish (ADR 0019). LastPublishedRevision
-	// is zero when nothing has ever been published.
+	// recent successful inventory publish (ADR 0019), from the durable
+	// record in swarmconn.Config — survives a restart, unlike the fields
+	// below.
 	LastPublishedRevision uint64
 	LastPublishedAt       string
+
+	// Publish* fields are the live PublishStatus (ADR 0020's follow-on):
+	// what's happening right now, or what just finished, in this running
+	// process. Rendered server-side on every load so a reload shows
+	// current state immediately; static/swarm.js polls
+	// /api/swarm/publish-status to keep it live without a reload while a
+	// publish is in progress.
+	PublishPhase         string
+	PublishRunning       bool
+	PublishPlatform      string
+	PublishPlatformIndex int
+	PublishPlatformTotal int
+	PublishItemsScanned  int
+	PublishStartedAt     string
+	PublishFinishedAt    string
+	PublishSummary       string
+	PublishError         string
 }
 
 func (s *Server) swarmPageDataFrom(r *http.Request) swarmPageData {
@@ -41,7 +60,48 @@ func (s *Server) swarmPageDataFrom(r *http.Request) swarmPageData {
 	if !status.LastPublishedAt.IsZero() {
 		data.LastPublishedAt = status.LastPublishedAt.Format(time.RFC3339)
 	}
+
+	applyPublishStatus(&data, s.Backend.PublishStatus())
 	return data
+}
+
+// applyPublishStatus fills in swarmPageData's live-status fields from a
+// PublishStatus snapshot — shared by the page render and, via
+// publishStatusJSON's parallel shape, the polling endpoint, so the two
+// never drift apart.
+func applyPublishStatus(data *swarmPageData, status PublishStatus) {
+	data.PublishPhase = string(status.Phase)
+	data.PublishRunning = status.Running()
+	data.PublishPlatform = string(status.Platform)
+	data.PublishPlatformIndex = status.PlatformIndex
+	data.PublishPlatformTotal = status.PlatformTotal
+	data.PublishItemsScanned = status.ItemsScanned
+	if !status.StartedAt.IsZero() {
+		data.PublishStartedAt = status.StartedAt.Format(time.RFC3339)
+	}
+	if !status.FinishedAt.IsZero() {
+		data.PublishFinishedAt = status.FinishedAt.Format(time.RFC3339)
+	}
+	if status.Phase == PublishPhaseError {
+		data.PublishError = status.Err
+	} else if status.Phase == PublishPhaseDone {
+		data.PublishSummary = publishResultSummary(status.Result)
+	}
+}
+
+func publishResultSummary(result InventoryPublishResult) string {
+	if !result.Published {
+		if len(result.SkipReasons) == 0 {
+			return "Nothing published — no eligible holdings found"
+		}
+		reasons := make([]string, 0, len(result.SkipReasons))
+		for reason, count := range result.SkipReasons {
+			reasons = append(reasons, fmt.Sprintf("%s (%d)", reason, count))
+		}
+		return "Nothing published — " + strings.Join(reasons, ", ")
+	}
+	return fmt.Sprintf("Published revision %d: %d item(s), %d distinct file(s) swarm-wide",
+		result.Revision, result.ItemCount, result.DistinctFiles)
 }
 
 func (s *Server) handleSwarmPage(w http.ResponseWriter, r *http.Request) {
@@ -98,28 +158,53 @@ func (s *Server) handleSwarmTest(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// publishInventoryTimeout is generous relative to handleSwarmTest's default
-// request handling — a full-catalogue scan-and-publish can take far longer
-// than a credential rotation, since it downloads and hashes every holding.
-const publishInventoryTimeout = 10 * time.Minute
-
-// handlePublishInventory wraps PublishInventory for the page's "Publish
-// Inventory" button, mirroring handleSwarmTest's JSON-response shape.
+// handlePublishInventory starts a publish in the background (via
+// TriggerPublishInventory, which handles "one already running" itself)
+// and returns the resulting status immediately — never blocks on a
+// publish actually finishing, since that can legitimately take minutes
+// and this page's "Publish Inventory" button needs to answer right away
+// so its status block (and static/swarm.js's polling) can start
+// reflecting live progress instead of leaving the operator staring at a
+// spinner with no way to tell a slow scan from a hang.
 func (s *Server) handlePublishInventory(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), publishInventoryTimeout)
-	defer cancel()
-	result, err := s.Backend.PublishInventory(ctx)
-	if err != nil {
-		writeJSONError(w, http.StatusUnprocessableEntity, err.Error())
-		return
+	writePublishStatusJSON(w, s.Backend.TriggerPublishInventory())
+}
+
+// handlePublishStatus serves the live PublishStatus as JSON, for
+// static/swarm.js to poll while a publish is in progress and for a page
+// reload to pick up current state without resubmitting anything.
+func (s *Server) handlePublishStatus(w http.ResponseWriter, r *http.Request) {
+	writePublishStatusJSON(w, s.Backend.PublishStatus())
+}
+
+func writePublishStatusJSON(w http.ResponseWriter, status PublishStatus) {
+	body := map[string]any{
+		"phase":          string(status.Phase),
+		"running":        status.Running(),
+		"platform":       string(status.Platform),
+		"platform_index": status.PlatformIndex,
+		"platform_total": status.PlatformTotal,
+		"items_scanned":  status.ItemsScanned,
+	}
+	if !status.StartedAt.IsZero() {
+		body["started_at"] = status.StartedAt
+	}
+	if !status.FinishedAt.IsZero() {
+		body["finished_at"] = status.FinishedAt
+	}
+	if status.Phase == PublishPhaseError {
+		body["error"] = status.Err
+	}
+	if status.Phase == PublishPhaseDone {
+		body["result"] = map[string]any{
+			"published":      status.Result.Published,
+			"item_count":     status.Result.ItemCount,
+			"skipped_count":  status.Result.SkippedCount,
+			"distinct_files": status.Result.DistinctFiles,
+			"revision":       uint64(status.Result.Revision),
+			"skip_reasons":   status.Result.SkipReasons,
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
-		"published":      result.Published,
-		"item_count":     result.ItemCount,
-		"skipped_count":  result.SkippedCount,
-		"distinct_files": result.DistinctFiles,
-		"revision":       uint64(result.Revision),
-		"skip_reasons":   result.SkipReasons,
-	})
+	json.NewEncoder(w).Encode(body)
 }
