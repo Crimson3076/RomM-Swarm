@@ -61,6 +61,12 @@ type Daemon struct {
 	// comment in inventory.go for why.
 	publishMu sync.Mutex
 
+	// libraryMu guards libraryCache/libraryCachedAt — see library.go's
+	// Library method.
+	libraryMu       sync.Mutex
+	libraryCache    []scan.ROMRecord
+	libraryCachedAt time.Time
+
 	conn atomic.Pointer[romm.Connection]
 }
 
@@ -129,6 +135,7 @@ func (d *Daemon) Reconnect(ctx context.Context) error {
 		return err
 	}
 	d.conn.Store(conn)
+	d.invalidateLibraryCache()
 	return nil
 }
 

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/Crimson3076/RomM-Swarm/bridge/bridgeconfig"
 	"github.com/Crimson3076/RomM-Swarm/bridge/ingest"
 	"github.com/Crimson3076/RomM-Swarm/bridge/romm"
+	"github.com/Crimson3076/RomM-Swarm/bridge/scan"
 	"github.com/Crimson3076/RomM-Swarm/protocol"
 )
 
@@ -50,6 +52,11 @@ type fakeBackend struct {
 	publishInventoryResult InventoryPublishResult
 	publishInventoryErr    error
 	publishInventoryCalls  int
+
+	library        []scan.ROMRecord
+	libraryErr     error
+	libraryCalls   int
+	libraryRefresh []bool // one entry per call, recording forceRefresh
 }
 
 type joinSwarmCall struct {
@@ -136,6 +143,15 @@ func (f *fakeBackend) PublishInventory(ctx context.Context) (InventoryPublishRes
 		return InventoryPublishResult{}, f.publishInventoryErr
 	}
 	return f.publishInventoryResult, nil
+}
+
+func (f *fakeBackend) Library(ctx context.Context, forceRefresh bool) ([]scan.ROMRecord, error) {
+	f.libraryCalls++
+	f.libraryRefresh = append(f.libraryRefresh, forceRefresh)
+	if f.libraryErr != nil {
+		return nil, f.libraryErr
+	}
+	return f.library, nil
 }
 
 func newTestServer(t *testing.T) (*Server, *fakeBackend) {
@@ -666,6 +682,149 @@ func mustSessionToken(t *testing.T, s *Server) string {
 		t.Fatalf("creating a session: %v", err)
 	}
 	return token
+}
+
+func fakeROMRecords(n int, platform string) []scan.ROMRecord {
+	out := make([]scan.ROMRecord, n)
+	for i := range out {
+		out[i] = scan.ROMRecord{
+			ID: strconv.Itoa(i), PlatformSlug: platform,
+			FSName: "Game " + strconv.Itoa(i) + ".rom", FSSizeBytes: 1024,
+		}
+	}
+	return out
+}
+
+// TestLibraryPageRendersOnlyTheFirstPageNotTheWholeLibrary is the direct
+// regression proof for the reported bug: a large library must not be
+// rendered into one giant HTML response — only the first libraryPageSize
+// items render server-side, with HasMore set so the page's JS knows to
+// keep fetching.
+func TestLibraryPageRendersOnlyTheFirstPageNotTheWholeLibrary(t *testing.T) {
+	s, backend := loggedInServerWithBackend(t, "https://x", "t")
+	backend.conn = &romm.Connection{}
+	backend.library = fakeROMRecords(250, "gb")
+
+	req := httptest.NewRequest(http.MethodGet, "/library", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: mustSessionToken(t, s)})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /library: status %d, body %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if got := strings.Count(body, "Download</a>"); got != libraryPageSize {
+		t.Fatalf("GET /library rendered %d row(s), want exactly %d (the first page)", got, libraryPageSize)
+	}
+	if !strings.Contains(body, "100 of 250 item(s) shown") {
+		t.Fatalf("GET /library status line did not report 100 of 250: %s", body)
+	}
+	if backend.libraryCalls != 1 || backend.libraryRefresh[0] != false {
+		t.Fatalf("Library was called %d time(s) with refresh %v, want one plain (non-forced) call", backend.libraryCalls, backend.libraryRefresh)
+	}
+}
+
+// TestLibraryItemsEndpointServesTheRemainingChunks proves the
+// infinite-scroll JSON endpoint actually returns the rest of the library
+// past the first page, and reports has_more correctly at the boundary.
+func TestLibraryItemsEndpointServesTheRemainingChunks(t *testing.T) {
+	s, backend := loggedInServerWithBackend(t, "https://x", "t")
+	backend.conn = &romm.Connection{}
+	backend.library = fakeROMRecords(250, "gb")
+
+	get := func(query string) map[string]any {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/library/items?"+query, nil)
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: mustSessionToken(t, s)})
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/library/items?%s: status %d, body %s", query, rec.Code, rec.Body.String())
+		}
+		var parsed map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &parsed); err != nil {
+			t.Fatalf("decoding response: %v", err)
+		}
+		return parsed
+	}
+
+	second := get("offset=100&limit=100")
+	items, _ := second["items"].([]any)
+	if len(items) != 100 || second["has_more"] != true {
+		t.Fatalf("second chunk = %d item(s), has_more=%v, want 100 item(s) and has_more=true", len(items), second["has_more"])
+	}
+
+	third := get("offset=200&limit=100")
+	items, _ = third["items"].([]any)
+	if len(items) != 50 || third["has_more"] != false {
+		t.Fatalf("third chunk = %d item(s), has_more=%v, want 50 item(s) and has_more=false", len(items), third["has_more"])
+	}
+
+	past := get("offset=300&limit=100")
+	items, _ = past["items"].([]any)
+	if len(items) != 0 || past["has_more"] != false {
+		t.Fatalf("past-the-end chunk = %d item(s), has_more=%v, want 0 item(s) and has_more=false", len(items), past["has_more"])
+	}
+}
+
+// TestLibraryPageFiltersByPlatformBeforeCounting proves Total/Count reflect
+// only the platform-filtered subset, not the whole library — both on the
+// server-rendered page and the JSON chunk endpoint.
+func TestLibraryPageFiltersByPlatformBeforeCounting(t *testing.T) {
+	s, backend := loggedInServerWithBackend(t, "https://x", "t")
+	backend.conn = &romm.Connection{}
+	backend.library = append(fakeROMRecords(3, "gb"), fakeROMRecords(150, "gba")...)
+
+	req := httptest.NewRequest(http.MethodGet, "/library?platform=gb", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: mustSessionToken(t, s)})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /library?platform=gb: status %d, body %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if got := strings.Count(body, "Download</a>"); got != 3 {
+		t.Fatalf("GET /library?platform=gb rendered %d row(s), want 3", got)
+	}
+	if !strings.Contains(body, `3 of 3 item(s) shown on platform "gb", out of 153 scanned`) {
+		t.Fatalf("status line did not reflect the filtered count against the unfiltered scanned total: %s", body)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/library/items?platform=gb&offset=0&limit=100", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: mustSessionToken(t, s)})
+	rec = httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	var parsed map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &parsed); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	items, _ := parsed["items"].([]any)
+	if len(items) != 3 || parsed["has_more"] != false {
+		t.Fatalf("filtered JSON chunk = %d item(s), has_more=%v, want 3 item(s) and has_more=false", len(items), parsed["has_more"])
+	}
+}
+
+// TestLibraryPageRefreshBypassesTheCache proves the page's "Refresh"
+// control actually asks Backend.Library for a forced refresh, not a plain
+// cached read.
+func TestLibraryPageRefreshBypassesTheCache(t *testing.T) {
+	s, backend := loggedInServerWithBackend(t, "https://x", "t")
+	backend.conn = &romm.Connection{}
+	backend.library = fakeROMRecords(1, "gb")
+
+	req := httptest.NewRequest(http.MethodGet, "/library?refresh=1", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: mustSessionToken(t, s)})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /library?refresh=1: status %d, body %s", rec.Code, rec.Body.String())
+	}
+	if backend.libraryCalls != 1 || backend.libraryRefresh[0] != true {
+		t.Fatalf("Library was called %d time(s) with refresh %v, want one forced call", backend.libraryCalls, backend.libraryRefresh)
+	}
 }
 
 // newMinimalFakeRomm serves just enough of the confirmed real RomM protocol

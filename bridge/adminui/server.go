@@ -63,6 +63,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /api/swarm/publish-inventory", s.requireConfiguredAndAuth(s.handlePublishInventory))
 
 	mux.HandleFunc("GET /library", s.requireConfiguredAndAuth(s.handleLibraryPage))
+	mux.HandleFunc("GET /api/library/items", s.requireConfiguredAndAuth(s.handleLibraryItems))
 	mux.HandleFunc("GET /api/library/download", s.requireConfiguredAndAuth(s.handleLibraryDownload))
 
 	mux.HandleFunc("GET /inbox", s.requireConfiguredAndAuth(s.handleInboxPage))

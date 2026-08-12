@@ -13,6 +13,7 @@ import (
 	"github.com/Crimson3076/RomM-Swarm/bridge/bridgeconfig"
 	"github.com/Crimson3076/RomM-Swarm/bridge/ingest"
 	"github.com/Crimson3076/RomM-Swarm/bridge/romm"
+	"github.com/Crimson3076/RomM-Swarm/bridge/scan"
 	"github.com/Crimson3076/RomM-Swarm/protocol"
 )
 
@@ -63,6 +64,13 @@ type Backend interface {
 	// and sends it to the Host — the manual, operator-triggered action
 	// behind the Swarm page's "Publish Inventory" button (ADR 0019).
 	PublishInventory(ctx context.Context) (InventoryPublishResult, error)
+
+	// Library returns RomM's full inventory listing, from an internal
+	// cache when forceRefresh is false and the cache is still fresh — the
+	// Library page (and its infinite-scroll chunks) call this on every
+	// request, and without caching that meant re-listing RomM's entire
+	// inventory from scratch each time.
+	Library(ctx context.Context, forceRefresh bool) ([]scan.ROMRecord, error)
 }
 
 // SwarmStatus is this Bridge's view of its own Network Host connection, as

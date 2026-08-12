@@ -35,6 +35,12 @@ type fakeBridgeServer struct {
 	roms     []map[string]any
 	nextRom  int
 	platform map[string]int // slug -> id
+
+	// romsListRequests counts calls to GET /api/roms — library_test.go
+	// uses this to prove Daemon.Library's cache actually avoids repeat
+	// RomM round trips, rather than just returning the same-looking data
+	// coincidentally.
+	romsListRequests int
 }
 
 type fakeUpload struct {
@@ -101,6 +107,7 @@ func (s *fakeBridgeServer) start(t *testing.T) *httptest.Server {
 	mux.HandleFunc("/api/roms", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		s.romsListRequests++
 		writeJSON(w, map[string]any{"items": s.roms, "total": len(s.roms)})
 	})
 	mux.HandleFunc("/api/roms/upload/start", func(w http.ResponseWriter, r *http.Request) {

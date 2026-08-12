@@ -1,19 +1,26 @@
 {{define "library"}}{{template "header" .}}
 <h1>Library</h1>
 <p>What your RomM server reports it holds. Pulling a copy streams it straight
-from RomM to your browser — nothing is staged on the Bridge for this.</p>
+from RomM to your browser — nothing is staged on the Bridge for this.
+Listings are cached briefly; use Refresh if you just imported something
+directly on RomM and don't see it yet.</p>
 
 <form method="get" action="/library" class="form form-inline">
   <label for="platform">Platform</label>
   <input type="text" id="platform" name="platform" value="{{.Platform}}" placeholder="gb, gba, nds, genesis, or any slug RomM reports">
   <button type="submit">Filter</button>
 </form>
+<form method="get" action="/library" class="form form-inline">
+  <input type="hidden" name="platform" value="{{.Platform}}">
+  <input type="hidden" name="refresh" value="1">
+  <button type="submit">Refresh</button>
+</form>
 
 {{if .Error}}<div class="flash flash-error">{{.Error}}</div>{{end}}
 
-<table class="table">
+<table class="table" id="library-table" data-platform="{{.Platform}}" data-offset="{{.Count}}" data-has-more="{{.HasMore}}">
   <thead><tr><th>Name</th><th>Platform</th><th>Size</th><th></th></tr></thead>
-  <tbody>
+  <tbody id="library-rows">
   {{range .Items}}
     <tr>
       <td>{{.FSName}}</td>
@@ -26,5 +33,6 @@ from RomM to your browser — nothing is staged on the Bridge for this.</p>
   {{end}}
   </tbody>
 </table>
-<p>{{.Count}} item(s) shown, out of {{.Scanned}} scanned.</p>
+<p id="library-status">{{.Count}} of {{.Total}} item(s) shown{{if .Platform}} on platform "{{.Platform}}"{{end}}, out of {{.Scanned}} scanned.</p>
+<script src="/static/library.js"></script>
 {{template "footer" .}}{{end}}
