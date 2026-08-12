@@ -29,6 +29,50 @@ func (s *Server) handleCreateSwarm(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/swarms/"+string(id), http.StatusSeeOther)
 }
 
+// handleDeleteSwarm permanently deletes a Swarm — the confirmation is that
+// the submitted confirm_name must match the Swarm's actual name exactly,
+// so an owner can't fat-finger a delete the way a bare "are you sure?"
+// button invites. See directory.DeleteSwarm's own doc comment for exactly
+// what is and isn't removed.
+func (s *Server) handleDeleteSwarm(w http.ResponseWriter, r *http.Request) {
+	swarmID := protocol.SwarmID(r.PathValue("swarmID"))
+	account := userFromContext(r.Context())
+
+	sw, err := s.Directory.GetSwarm(r.Context(), account, swarmID)
+	if err != nil {
+		s.swarmViewError(w, r, swarmID, "could not load Swarm: "+err.Error())
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		s.swarmViewError(w, r, swarmID, "could not read the submitted form")
+		return
+	}
+	if r.FormValue("confirm_name") != sw.Name {
+		s.swarmViewError(w, r, swarmID, "the typed name did not match \""+sw.Name+"\" — Swarm not deleted")
+		return
+	}
+
+	if err := s.Directory.DeleteSwarm(r.Context(), account, swarmID); err != nil {
+		s.swarmViewError(w, r, swarmID, "could not delete Swarm: "+err.Error())
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// handleDeleteInvitation permanently removes one invitation from the
+// Swarm's list. See directory.DeleteInvitation's own doc comment.
+func (s *Server) handleDeleteInvitation(w http.ResponseWriter, r *http.Request) {
+	swarmID := protocol.SwarmID(r.PathValue("swarmID"))
+	invitationID := protocol.InvitationID(r.PathValue("invitationID"))
+
+	if err := s.Directory.DeleteInvitation(r.Context(), swarmID, invitationID); err != nil {
+		s.swarmViewError(w, r, swarmID, "could not delete invitation: "+err.Error())
+		return
+	}
+	http.Redirect(w, r, "/swarms/"+string(swarmID), http.StatusSeeOther)
+}
+
 func (s *Server) dashboardError(w http.ResponseWriter, r *http.Request, msg string) {
 	data := dashboardData{baseData: s.base(r, "Dashboard")}
 	data.Error = msg

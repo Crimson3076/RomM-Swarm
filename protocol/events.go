@@ -117,10 +117,13 @@ const (
 
 // Account, Swarm, and invitation lifecycle. ADR 0016.
 const (
-	EventUserRegistered   EventKind = "user.registered"
-	EventSwarmCreated     EventKind = "swarm.created"
-	EventInvitationIssued EventKind = "invitation.issued"
-	EventBridgeReenrolled EventKind = "bridge.reenrolled"
+	EventUserRegistered    EventKind = "user.registered"
+	EventSwarmCreated      EventKind = "swarm.created"
+	EventSwarmDeleted      EventKind = "swarm.deleted"
+	EventInvitationIssued  EventKind = "invitation.issued"
+	EventInvitationDeleted EventKind = "invitation.deleted"
+	EventBridgeReenrolled  EventKind = "bridge.reenrolled"
+	EventBridgeRemoved     EventKind = "bridge.removed"
 )
 
 // eventSpec describes one member of the vocabulary.
@@ -183,10 +186,13 @@ var vocabulary = map[EventKind]eventSpec{
 	EventAuthFailure:      {RetentionSecurity, false, "an authentication attempt failed"},
 	EventRateLimited:      {RetentionSecurity, false, "a caller exceeded a rate limit"},
 
-	EventUserRegistered:   {RetentionAudit, false, "a Host account was created"},
-	EventSwarmCreated:     {RetentionAudit, false, "a Swarm was created"},
-	EventInvitationIssued: {RetentionAudit, false, "a Swarm invitation was issued"},
-	EventBridgeReenrolled: {RetentionAudit, false, "an owner re-enrolled a revoked Bridge identity"},
+	EventUserRegistered:    {RetentionAudit, false, "a Host account was created"},
+	EventSwarmCreated:      {RetentionAudit, false, "a Swarm was created"},
+	EventSwarmDeleted:      {RetentionAudit, false, "a Swarm and everything scoped to it was deleted"},
+	EventInvitationIssued:  {RetentionAudit, false, "a Swarm invitation was issued"},
+	EventInvitationDeleted: {RetentionAudit, false, "a Swarm invitation was deleted"},
+	EventBridgeReenrolled:  {RetentionAudit, false, "an owner re-enrolled a revoked Bridge identity"},
+	EventBridgeRemoved:     {RetentionAudit, false, "an owner removed a Bridge's membership from a Swarm"},
 }
 
 // Known reports whether the kind is part of the vocabulary. The Host rejects

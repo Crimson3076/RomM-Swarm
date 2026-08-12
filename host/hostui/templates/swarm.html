@@ -6,7 +6,7 @@
   <h2>Invitations</h2>
   {{if .Invitations}}
   <table class="table">
-    <thead><tr><th>ID</th><th>Uses</th><th>Expires</th><th>Status</th></tr></thead>
+    <thead><tr><th>ID</th><th>Uses</th><th>Expires</th><th>Status</th><th></th></tr></thead>
     <tbody>
     {{range .Invitations}}
       <tr>
@@ -14,6 +14,11 @@
         <td>{{.UseCount}}/{{.MaxUses}}</td>
         <td>{{.ExpiresAt}}</td>
         <td>{{if .Revoked}}<span class="status-bad">revoked</span>{{else}}<span class="status-ok">active</span>{{end}}</td>
+        <td>
+          <form method="post" action="/swarms/{{$.Swarm.ID}}/invitations/{{.ID}}/delete" class="form-inline">
+            <button type="submit" class="link-button" onclick="return confirm('Delete this invitation? Bridges already enrolled through it are not affected.');">Delete</button>
+          </form>
+        </td>
       </tr>
     {{end}}
     </tbody>
@@ -64,6 +69,9 @@
           <form method="post" action="/swarms/{{$.Swarm.ID}}/bridges/{{.ID}}/reenroll" class="form-inline">
             <button type="submit" class="link-button">Re-enroll</button>
           </form>
+          <form method="post" action="/swarms/{{$.Swarm.ID}}/bridges/{{.ID}}/remove" class="form-inline">
+            <button type="submit" class="link-button" onclick="return confirm('Remove this Bridge from this Swarm? Its identity and credential are unaffected — this only clears it from this Swarm’s roster and inventory stats.');">Remove</button>
+          </form>
           {{end}}
         </td>
       </tr>
@@ -73,5 +81,27 @@
   {{else}}
   <p>No Bridges enrolled in this Swarm yet.</p>
   {{end}}
+</div>
+
+<div class="card">
+  <h2>Danger zone</h2>
+  <p>Deleting this Swarm removes its invitations, Bridge memberships, and
+  inventory stats. Bridges' own identities and credentials are not
+  affected. This cannot be undone.</p>
+  <form method="post" action="/swarms/{{.Swarm.ID}}/delete" class="form" id="delete-swarm-form" onsubmit="return confirm('This is permanent. Delete this Swarm?');">
+    <label for="confirm_name">Type <strong>{{.Swarm.Name}}</strong> to confirm</label>
+    <input type="text" id="confirm_name" name="confirm_name" autocomplete="off" required>
+    <button type="submit" id="delete-swarm-button" disabled>Delete Swarm</button>
+  </form>
+  <script>
+    (function () {
+      var input = document.getElementById("confirm_name");
+      var button = document.getElementById("delete-swarm-button");
+      var expected = {{.Swarm.Name}};
+      input.addEventListener("input", function () {
+        button.disabled = input.value !== expected;
+      });
+    })();
+  </script>
 </div>
 {{template "footer" .}}{{end}}

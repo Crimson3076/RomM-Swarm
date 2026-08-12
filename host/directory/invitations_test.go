@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/Crimson3076/RomM-Swarm/host/directory"
+	"github.com/Crimson3076/RomM-Swarm/protocol"
 )
 
 func TestPhase2_IssueInvitationStoresOnlyTheHash(t *testing.T) {
@@ -107,5 +110,67 @@ func TestPhase2_ListInvitationsNeverIncludesTheCode(t *testing.T) {
 	}
 	if !got.RevokedAt.IsZero() {
 		t.Fatalf("a fresh invitation reports a revocation time: %+v", got)
+	}
+}
+
+func TestPhase2_DeleteInvitationRemovesItWithoutTouchingTheBridgeItEnrolled(t *testing.T) {
+	d := newTestDirectory(t)
+	ctx := context.Background()
+
+	owner, err := d.BootstrapOwner(ctx, "owner", "The Owner", "", "the-password")
+	if err != nil {
+		t.Fatalf("BootstrapOwner: %v", err)
+	}
+	swarmID, err := d.CreateSwarm(ctx, owner, "Test Swarm")
+	if err != nil {
+		t.Fatalf("CreateSwarm: %v", err)
+	}
+	code, invitationID, err := d.IssueInvitation(ctx, swarmID, owner, 1, 0)
+	if err != nil {
+		t.Fatalf("IssueInvitation: %v", err)
+	}
+	bridgeID, _, _, _, err := d.RedeemInvitation(ctx, code, randomKey(t))
+	if err != nil {
+		t.Fatalf("RedeemInvitation: %v", err)
+	}
+
+	if err := d.DeleteInvitation(ctx, swarmID, invitationID); err != nil {
+		t.Fatalf("DeleteInvitation: %v", err)
+	}
+
+	invitations, err := d.ListInvitations(ctx, swarmID)
+	if err != nil {
+		t.Fatalf("ListInvitations: %v", err)
+	}
+	if len(invitations) != 0 {
+		t.Fatalf("ListInvitations after delete = %+v, want none", invitations)
+	}
+
+	// The Bridge it enrolled is still a member — deleting the invitation
+	// only forgets which one it came in through.
+	bridges, err := d.ListBridgesForSwarm(ctx, swarmID)
+	if err != nil {
+		t.Fatalf("ListBridgesForSwarm: %v", err)
+	}
+	if len(bridges) != 1 || bridges[0].BridgeID != bridgeID {
+		t.Fatalf("ListBridgesForSwarm after deleting its invitation = %+v, want the Bridge still listed", bridges)
+	}
+}
+
+func TestPhase2_DeleteInvitationRejectsAnUnknownID(t *testing.T) {
+	d := newTestDirectory(t)
+	ctx := context.Background()
+
+	owner, err := d.BootstrapOwner(ctx, "owner", "The Owner", "", "the-password")
+	if err != nil {
+		t.Fatalf("BootstrapOwner: %v", err)
+	}
+	swarmID, err := d.CreateSwarm(ctx, owner, "Test Swarm")
+	if err != nil {
+		t.Fatalf("CreateSwarm: %v", err)
+	}
+
+	if err := d.DeleteInvitation(ctx, swarmID, protocol.NewInvitationID()); err != directory.ErrInvitationNotFound {
+		t.Fatalf("DeleteInvitation for an unknown id: err = %v, want ErrInvitationNotFound", err)
 	}
 }

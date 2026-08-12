@@ -204,6 +204,54 @@ func (d *Directory) ListBridgesForSwarm(ctx context.Context, swarm protocol.Swar
 // caller is managing.
 var ErrBridgeNotInSwarm = errors.New("directory: bridge is not a member of this swarm")
 
+// RemoveBridgeFromSwarm deletes bridge's membership row (and this Swarm's
+// share of its inventory) from swarm, without touching the Bridge's
+// global identity, credential family, or membership in any other Swarm —
+// the same "never delete what the Host doesn't own" boundary DeleteSwarm
+// applies. Intended for a Bridge whose credential is already revoked
+// (RevokeBridge) and that the owner now wants off the roster entirely,
+// not a substitute for revocation: removing membership here does not by
+// itself invalidate a credential the Bridge might still hold.
+func (d *Directory) RemoveBridgeFromSwarm(ctx context.Context, swarm protocol.SwarmID, bridge protocol.BridgeID) error {
+	tx, err := d.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("directory: starting remove-Bridge transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM inventory_items WHERE swarm_id = $1 AND bridge_id = $2`,
+		string(swarm), string(bridge)); err != nil {
+		return fmt.Errorf("directory: removing Bridge inventory items: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM inventory_snapshots WHERE swarm_id = $1 AND bridge_id = $2`,
+		string(swarm), string(bridge)); err != nil {
+		return fmt.Errorf("directory: removing Bridge inventory snapshot: %w", err)
+	}
+
+	result, err := tx.ExecContext(ctx, `
+		DELETE FROM bridge_swarm_memberships WHERE swarm_id = $1 AND bridge_id = $2`,
+		string(swarm), string(bridge))
+	if err != nil {
+		return fmt.Errorf("directory: removing Bridge membership: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("directory: removing Bridge membership: %w", err)
+	}
+	if n == 0 {
+		return ErrBridgeNotInSwarm
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("directory: committing Bridge removal: %w", err)
+	}
+
+	_ = d.events.Record(ctx, protocol.Event{Kind: protocol.EventBridgeRemoved, At: d.now(), SwarmID: swarm, ActorBridge: bridge})
+	return nil
+}
+
 // SetBridgeDisplayName sets the Host-assigned, per-Swarm label an owner
 // sees for bridge in swarm. Deliberately Host-authoritative, not
 // Bridge-self-declared — see the schema comment on bridge_swarm_memberships

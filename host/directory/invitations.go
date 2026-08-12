@@ -3,6 +3,7 @@ package directory
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -67,6 +68,51 @@ type Invitation struct {
 	ExpiresAt time.Time
 	CreatedAt time.Time
 	RevokedAt time.Time
+}
+
+// ErrInvitationNotFound means invitation has no row in swarm — either it
+// was never issued there or has already been deleted.
+var ErrInvitationNotFound = errors.New("directory: no such invitation")
+
+// DeleteInvitation permanently removes one invitation from swarm —
+// active, expired, exhausted, or already revoked; delete doesn't care
+// which. Any Bridge enrolled through it (bridge_swarm_memberships'
+// nullable enrolled_via_invitation) keeps its membership row: this
+// forgets which invitation a Bridge came in through, not that the Bridge
+// is a member.
+func (d *Directory) DeleteInvitation(ctx context.Context, swarm protocol.SwarmID, invitation protocol.InvitationID) error {
+	tx, err := d.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("directory: starting delete-invitation transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE bridge_swarm_memberships SET enrolled_via_invitation = NULL
+		WHERE enrolled_via_invitation = $1`, string(invitation)); err != nil {
+		return fmt.Errorf("directory: clearing invitation references: %w", err)
+	}
+
+	result, err := tx.ExecContext(ctx, `
+		DELETE FROM invitations WHERE id = $1 AND swarm_id = $2`,
+		string(invitation), string(swarm))
+	if err != nil {
+		return fmt.Errorf("directory: deleting invitation: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("directory: deleting invitation: %w", err)
+	}
+	if n == 0 {
+		return ErrInvitationNotFound
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("directory: committing invitation deletion: %w", err)
+	}
+
+	_ = d.events.Record(ctx, protocol.Event{Kind: protocol.EventInvitationDeleted, At: d.now(), SwarmID: swarm})
+	return nil
 }
 
 // ListInvitations returns every invitation ever issued for swarm, most

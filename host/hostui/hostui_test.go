@@ -376,6 +376,232 @@ func TestPhase2_SwarmViewShowsInventoryTotalsAfterAPublish(t *testing.T) {
 	}
 }
 
+// TestPhase2_DeleteSwarmRequiresTheTypedNameToMatch proves the confirm-by-
+// typing-the-name safety net actually blocks a mismatched submission
+// server-side, not just via the page's disabled-button JS a raw POST
+// bypasses entirely.
+func TestPhase2_DeleteSwarmRequiresTheTypedNameToMatch(t *testing.T) {
+	srv, _ := newTestServer(t)
+	client := newClient(t)
+
+	form := url.Values{
+		"username": {"owner"}, "display_name": {"The Owner"},
+		"password": {"a-long-enough-password"}, "password_confirm": {"a-long-enough-password"},
+	}
+	if _, err := client.PostForm(srv.URL+"/setup", form); err != nil {
+		t.Fatalf("POST /setup: %v", err)
+	}
+
+	resp, err := client.PostForm(srv.URL+"/swarms", url.Values{"name": {"Precious Swarm"}})
+	if err != nil {
+		t.Fatalf("POST /swarms: %v", err)
+	}
+	swarmPath := resp.Header.Get("Location")
+
+	// Wrong name: rejected, and the Swarm survives.
+	resp, err = client.PostForm(srv.URL+swarmPath+"/delete", url.Values{"confirm_name": {"Not The Right Name"}})
+	if err != nil {
+		t.Fatalf("POST delete with a wrong name: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("POST delete with a wrong name: status %d, want 422", resp.StatusCode)
+	}
+	body, _ := readAll(resp)
+	if !strings.Contains(body, "did not match") {
+		t.Fatalf("delete-with-wrong-name response did not explain why: %s", body)
+	}
+
+	stillThere, err := client.Get(srv.URL + swarmPath)
+	if err != nil {
+		t.Fatalf("GET %s: %v", swarmPath, err)
+	}
+	if stillThere.StatusCode != http.StatusOK {
+		t.Fatalf("the Swarm was deleted despite a mismatched confirmation name: GET %s returned %d", swarmPath, stillThere.StatusCode)
+	}
+
+	// Correct name: deleted, redirected home, and gone for good.
+	resp, err = client.PostForm(srv.URL+swarmPath+"/delete", url.Values{"confirm_name": {"Precious Swarm"}})
+	if err != nil {
+		t.Fatalf("POST delete with the right name: %v", err)
+	}
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/" {
+		t.Fatalf("POST delete with the right name: status %d, location %q, want a redirect to /", resp.StatusCode, resp.Header.Get("Location"))
+	}
+
+	gone, err := client.Get(srv.URL + swarmPath)
+	if err != nil {
+		t.Fatalf("GET %s after deletion: %v", swarmPath, err)
+	}
+	if gone.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET %s after deletion: status %d, want 404", swarmPath, gone.StatusCode)
+	}
+}
+
+// TestPhase2_DeleteInvitationRemovesItFromTheSwarmPage proves the delete
+// button on an invitation row actually removes it.
+func TestPhase2_DeleteInvitationRemovesItFromTheSwarmPage(t *testing.T) {
+	srv, _ := newTestServer(t)
+	client := newClient(t)
+
+	form := url.Values{
+		"username": {"owner"}, "display_name": {"The Owner"},
+		"password": {"a-long-enough-password"}, "password_confirm": {"a-long-enough-password"},
+	}
+	if _, err := client.PostForm(srv.URL+"/setup", form); err != nil {
+		t.Fatalf("POST /setup: %v", err)
+	}
+	resp, err := client.PostForm(srv.URL+"/swarms", url.Values{"name": {"Test Swarm"}})
+	if err != nil {
+		t.Fatalf("POST /swarms: %v", err)
+	}
+	swarmPath := resp.Header.Get("Location")
+
+	inviteResp, err := client.PostForm(srv.URL+swarmPath+"/invitations", nil)
+	if err != nil {
+		t.Fatalf("POST invitations: %v", err)
+	}
+	inviteBody, _ := readAll(inviteResp)
+	code := extractCodeDisplay(t, inviteBody)
+
+	page, err := client.Get(srv.URL + swarmPath)
+	if err != nil {
+		t.Fatalf("GET %s: %v", swarmPath, err)
+	}
+	body, _ := readAll(page)
+	invitationID := extractInvitationID(t, body)
+	if !strings.Contains(body, invitationID) {
+		t.Fatalf("Swarm page did not list the issued invitation: %s", body)
+	}
+
+	resp, err = client.PostForm(srv.URL+swarmPath+"/invitations/"+invitationID+"/delete", nil)
+	if err != nil {
+		t.Fatalf("POST delete invitation: %v", err)
+	}
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("POST delete invitation: status %d", resp.StatusCode)
+	}
+
+	after, err := client.Get(srv.URL + swarmPath)
+	if err != nil {
+		t.Fatalf("GET %s: %v", swarmPath, err)
+	}
+	afterBody, _ := readAll(after)
+	if strings.Contains(afterBody, invitationID) {
+		t.Fatalf("Swarm page still lists the deleted invitation: %s", afterBody)
+	}
+	if !strings.Contains(afterBody, "No invitations issued yet.") {
+		t.Fatalf("Swarm page did not fall back to the empty-invitations message: %s", afterBody)
+	}
+	_ = code // the code itself is irrelevant once deletion is what's under test
+}
+
+// TestPhase2_RemoveBridgeOnlyOfferedAfterRevokeAndRemovesItFromTheSwarm
+// proves the Remove button is gated on the Bridge's credential already
+// being revoked, and that using it actually clears the Bridge off this
+// Swarm's roster.
+func TestPhase2_RemoveBridgeOnlyOfferedAfterRevokeAndRemovesItFromTheSwarm(t *testing.T) {
+	srv, dir := newTestServer(t)
+	client := newClient(t)
+
+	form := url.Values{
+		"username": {"owner"}, "display_name": {"The Owner"},
+		"password": {"a-long-enough-password"}, "password_confirm": {"a-long-enough-password"},
+	}
+	if _, err := client.PostForm(srv.URL+"/setup", form); err != nil {
+		t.Fatalf("POST /setup: %v", err)
+	}
+	resp, err := client.PostForm(srv.URL+"/swarms", url.Values{"name": {"Test Swarm"}})
+	if err != nil {
+		t.Fatalf("POST /swarms: %v", err)
+	}
+	swarmPath := resp.Header.Get("Location")
+
+	inviteResp, err := client.PostForm(srv.URL+swarmPath+"/invitations", nil)
+	if err != nil {
+		t.Fatalf("POST invitations: %v", err)
+	}
+	inviteBody, _ := readAll(inviteResp)
+	code := extractCodeDisplay(t, inviteBody)
+
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ed25519.GenerateKey: %v", err)
+	}
+	bridgeID, _, _, _, err := dir.RedeemInvitation(context.Background(), directory.InvitationCode(code), pub)
+	if err != nil {
+		t.Fatalf("RedeemInvitation: %v", err)
+	}
+
+	removePath := swarmPath + "/bridges/" + string(bridgeID) + "/remove"
+
+	// Not yet revoked: the button (and therefore the route's normal
+	// entry point) isn't offered, but proving the gate is real means
+	// checking the page doesn't render the form at all.
+	beforeRevoke, err := client.Get(srv.URL + swarmPath)
+	if err != nil {
+		t.Fatalf("GET %s: %v", swarmPath, err)
+	}
+	beforeBody, _ := readAll(beforeRevoke)
+	if strings.Contains(beforeBody, removePath) {
+		t.Fatalf("Swarm page offered Remove before the Bridge was revoked: %s", beforeBody)
+	}
+
+	resp, err = client.PostForm(srv.URL+swarmPath+"/bridges/"+string(bridgeID)+"/revoke", nil)
+	if err != nil {
+		t.Fatalf("POST revoke: %v", err)
+	}
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("POST revoke: status %d", resp.StatusCode)
+	}
+
+	afterRevoke, err := client.Get(srv.URL + swarmPath)
+	if err != nil {
+		t.Fatalf("GET %s: %v", swarmPath, err)
+	}
+	afterRevokeBody, _ := readAll(afterRevoke)
+	if !strings.Contains(afterRevokeBody, removePath) {
+		t.Fatalf("Swarm page did not offer Remove once the Bridge was revoked: %s", afterRevokeBody)
+	}
+
+	resp, err = client.PostForm(srv.URL+removePath, nil)
+	if err != nil {
+		t.Fatalf("POST remove: %v", err)
+	}
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("POST remove: status %d", resp.StatusCode)
+	}
+
+	final, err := client.Get(srv.URL + swarmPath)
+	if err != nil {
+		t.Fatalf("GET %s: %v", swarmPath, err)
+	}
+	finalBody, _ := readAll(final)
+	if strings.Contains(finalBody, string(bridgeID)) {
+		t.Fatalf("Swarm page still lists the removed Bridge: %s", finalBody)
+	}
+	if !strings.Contains(finalBody, "No Bridges enrolled in this Swarm yet.") {
+		t.Fatalf("Swarm page did not fall back to the empty-Bridges message: %s", finalBody)
+	}
+}
+
+// extractInvitationID pulls the invitation ID out of the Swarm page's
+// invitations table — the first table cell of the first data row,
+// identified by its "inv_" prefix (protocol.InvitationID's own prefix).
+func extractInvitationID(t *testing.T, body string) string {
+	t.Helper()
+	const marker = "<td>inv_"
+	i := strings.Index(body, marker)
+	if i < 0 {
+		t.Fatalf("no invitation ID found in the Swarm page: %s", body)
+	}
+	rest := body[i+len("<td>"):]
+	j := strings.Index(rest, "<")
+	if j < 0 {
+		t.Fatalf("malformed invitation ID cell: %s", body)
+	}
+	return rest[:j]
+}
+
 func extractCodeDisplay(t *testing.T, body string) string {
 	t.Helper()
 	const marker = `class="code-display">`

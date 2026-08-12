@@ -327,6 +327,68 @@ func TestPhase2_SetBridgeDisplayName(t *testing.T) {
 	}
 }
 
+func TestPhase2_RemoveBridgeFromSwarmDeletesMembershipAndInventoryButNotIdentity(t *testing.T) {
+	d, _, swarmID, bridgeID, alias, token := enrolledFixture(t)
+	ctx := context.Background()
+
+	m := validManifest(swarmID, alias, 1, validItem("item-a", protocol.PlatformGB, 100))
+	if _, err := d.PublishInventory(ctx, bridgeID, token, m); err != nil {
+		t.Fatalf("PublishInventory: %v", err)
+	}
+
+	if err := d.RemoveBridgeFromSwarm(ctx, swarmID, bridgeID); err != nil {
+		t.Fatalf("RemoveBridgeFromSwarm: %v", err)
+	}
+
+	bridges, err := d.ListBridgesForSwarm(ctx, swarmID)
+	if err != nil {
+		t.Fatalf("ListBridgesForSwarm: %v", err)
+	}
+	if len(bridges) != 0 {
+		t.Fatalf("ListBridgesForSwarm after removal = %+v, want none", bridges)
+	}
+
+	var itemCount, snapshotCount, bridgeCount int
+	if err := d.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM inventory_items WHERE swarm_id = $1 AND bridge_id = $2`,
+		string(swarmID), string(bridgeID)).Scan(&itemCount); err != nil {
+		t.Fatalf("counting inventory_items: %v", err)
+	}
+	if err := d.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM inventory_snapshots WHERE swarm_id = $1 AND bridge_id = $2`,
+		string(swarmID), string(bridgeID)).Scan(&snapshotCount); err != nil {
+		t.Fatalf("counting inventory_snapshots: %v", err)
+	}
+	if itemCount != 0 || snapshotCount != 0 {
+		t.Fatalf("inventory rows survived removal: items=%d snapshots=%d", itemCount, snapshotCount)
+	}
+
+	// The Bridge's own global identity must survive removal from one Swarm.
+	if err := d.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM bridges WHERE id = $1`, string(bridgeID)).Scan(&bridgeCount); err != nil {
+		t.Fatalf("counting bridges: %v", err)
+	}
+	if bridgeCount != 1 {
+		t.Fatalf("the Bridge's own identity row was deleted along with its Swarm membership (count=%d)", bridgeCount)
+	}
+}
+
+func TestPhase2_RemoveBridgeFromSwarmRejectsANonMember(t *testing.T) {
+	d := newTestDirectory(t)
+	ctx := context.Background()
+
+	owner, err := d.BootstrapOwner(ctx, "owner", "The Owner", "", "the-password")
+	if err != nil {
+		t.Fatalf("BootstrapOwner: %v", err)
+	}
+	swarmID, err := d.CreateSwarm(ctx, owner, "Test Swarm")
+	if err != nil {
+		t.Fatalf("CreateSwarm: %v", err)
+	}
+
+	nonMember := protocol.BridgeIDFromPublicKey(randomKey(t))
+	if err := d.RemoveBridgeFromSwarm(ctx, swarmID, nonMember); !errors.Is(err, directory.ErrBridgeNotInSwarm) {
+		t.Fatalf("RemoveBridgeFromSwarm for a non-member: err = %v, want ErrBridgeNotInSwarm", err)
+	}
+}
+
 // TestPhase2_RedeemInvitationReturnsTheCorrectSwarmAndAlias is ADR 0019's
 // enrollment-fix proof: a Bridge cannot compute its own alias (the Swarm's
 // alias key never leaves the Host, protocol/alias.go), so RedeemInvitation
