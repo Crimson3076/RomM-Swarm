@@ -211,7 +211,10 @@ management as part of this record.
   Work explicitly defers "whether the Host may retrieve approved DAT
   updates automatically" to Phase 4). The env-var bootstrap in this record
   is a deliberately minimal stand-in, not that feature.
-- Automatic or scheduled publishing — manual trigger only.
+- Automatic or scheduled publishing — manual trigger only in this record.
+  Superseded by [ADR 0020](0020-automatic-inventory-publishing.md), which
+  adds a background scheduler and event triggers on top of the manual
+  path this record ships.
 - Real short-lived access-token authentication — `Authenticate` presenting
   the refresh token itself is this slice's answer; a real access-token
   mechanism is deferred, named as an open question below.

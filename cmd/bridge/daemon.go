@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -55,6 +56,10 @@ type Daemon struct {
 	// reports every item on that platform as skipped rather than silently
 	// omitting it.
 	referenceSelections map[protocol.PlatformID]*reference.Selection
+
+	// publishMu serializes every PublishInventory call — see its own doc
+	// comment in inventory.go for why.
+	publishMu sync.Mutex
 
 	conn atomic.Pointer[romm.Connection]
 }

@@ -73,14 +73,21 @@ func main() {
 		fmt.Printf("bridge: config dir %s ready, not yet configured — visit the admin UI to run /setup.\n", configDir)
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	stopCleanup := startAbandonedStagingCleanup(d)
 	defer stopCleanup()
 
+	// Auto-publish (ADR 0019's follow-on): started unconditionally, not
+	// just when already joined at boot — a Bridge can join a Swarm later
+	// through the admin UI, and this loop picks that up on its own without
+	// needing a restart (see StartAutoPublish's own doc comment).
+	stopAutoPublish := d.StartAutoPublish(ctx, publishIntervalFromEnv())
+	defer stopAutoPublish()
+
 	server := adminui.New(d, inboxDir)
 	httpServer := &http.Server{Addr: *addr, Handler: server}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	serveErr := make(chan error, 1)
 	go func() {

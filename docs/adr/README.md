@@ -43,6 +43,7 @@ point.
 | [0017](0017-bridge-host-enrollment.md) | Bridge identity keys and Host enrollment over the network | no | Accepted |
 | [0018](0018-network-host-web-ui.md) | Network Host web UI | no | Accepted |
 | [0019](0019-inventory-publishing.md) | Bridge inventory publishing to the Host | no | Accepted |
+| [0020](0020-automatic-inventory-publishing.md) | Automatic inventory publishing | no | Accepted |
 
 ## Phase 0 gate coverage
 

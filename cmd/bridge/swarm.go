@@ -95,6 +95,22 @@ func (d *Daemon) JoinSwarm(ctx context.Context, hostURL, code string) (protocol.
 		return "", fmt.Errorf("bridge: persisting the Host connection: %w", err)
 	}
 
+	// Publish once immediately, so a newly-enrolled Bridge shows real
+	// stats on the Host right away rather than waiting for the next
+	// scheduled tick (ADR 0019's follow-on). Backgrounded on its own
+	// context, not ctx: JoinSwarm's caller (an HTTP handler) cancels ctx
+	// as soon as it returns, well before a scan-and-publish could finish —
+	// the same reasoning StartImport's own background goroutine documents.
+	// Best-effort: a failure here is logged, not returned, since the join
+	// itself already succeeded and must not be reported as failed over it.
+	go func() {
+		publishCtx, cancel := context.WithTimeout(context.Background(), autoPublishTimeout)
+		defer cancel()
+		if _, err := d.PublishInventory(publishCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "bridge: initial inventory publish after joining failed: %v\n", err)
+		}
+	}()
+
 	return enrolled.BridgeID, nil
 }
 

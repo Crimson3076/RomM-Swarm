@@ -14,6 +14,13 @@ import (
 	"github.com/Crimson3076/RomM-Swarm/protocol"
 )
 
+// autoPublishTimeout bounds one automatic (startup, post-join, or
+// scheduled) publish attempt — see autopublish.go. Generous, since a
+// full-catalogue scan-and-publish legitimately takes a while, but bounded
+// so a hung Host or RomM connection can never wedge a scheduled tick
+// forever.
+const autoPublishTimeout = 5 * time.Minute
+
 // scanHoldings scans every protocol.InitialPlatforms() platform the
 // connected RomM server actually has, using whatever reference Selection
 // is loaded for that platform. A platform with no Selection isn't skipped
@@ -51,10 +58,18 @@ func (d *Daemon) scanHoldings(ctx context.Context) ([]protocol.Item, []scan.Skip
 }
 
 // PublishInventory implements bridge/adminui.Backend: scans local
-// holdings, builds this Swarm's manifest, and sends it to the Host — the
-// manual, operator-triggered action ADR 0019 deliberately keeps this as
-// (no background scheduler, mirroring TestSwarmConnection).
+// holdings, builds this Swarm's manifest, and sends it to the Host. Called
+// both manually (the admin UI's button) and automatically (autopublish.go,
+// ADR 0019's follow-on) — publishMu serializes every call, manual or
+// automatic, so two overlapping publishes can never race the
+// Load-modify-Save of swarmStore's LastPublishedRevision/LastPublishedAt
+// (the same class of lost-update hazard auth.Store's bridgeLocks closes
+// for credential rotation; here a single mutex is enough, since a Bridge
+// only ever has one Swarm connection to publish to at a time).
 func (d *Daemon) PublishInventory(ctx context.Context) (adminui.InventoryPublishResult, error) {
+	d.publishMu.Lock()
+	defer d.publishMu.Unlock()
+
 	swarmCfg, err := d.swarmStore.Load()
 	if err != nil {
 		return adminui.InventoryPublishResult{}, err
