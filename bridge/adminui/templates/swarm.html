@@ -1,0 +1,30 @@
+{{define "swarm"}}{{template "header" .}}
+<h1>Swarm</h1>
+
+<div class="card">
+  <h2>Host connection</h2>
+  {{if .Joined}}
+  <p>Joined <strong>{{.HostURL}}</strong> as <code>{{.BridgeID}}</code>.</p>
+  <p class="hint">Generation {{.Generation}}{{if .LastRotated}}, last rotated {{.LastRotated}}{{end}}</p>
+  <button type="button" id="test-swarm">Test Swarm Connection</button>
+  <span id="test-swarm-result"></span>
+  {{else}}
+  <p>This Bridge has not joined a Swarm yet.</p>
+  {{end}}
+</div>
+
+<div class="card">
+  <h2>{{if .Joined}}Join a different Swarm{{else}}Join a Swarm{{end}}</h2>
+  <form method="post" action="/swarm" class="form">
+    <label for="host_url">Host URL</label>
+    <input type="url" id="host_url" name="host_url" required placeholder="https://host.example.com">
+
+    <label for="invitation_code">Invitation code</label>
+    <input type="text" id="invitation_code" name="invitation_code" required autocomplete="off">
+
+    <button type="submit">Join</button>
+  </form>
+</div>
+
+<script src="/static/swarm.js"></script>
+{{template "footer" .}}{{end}}

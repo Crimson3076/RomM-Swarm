@@ -9,6 +9,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/Crimson3076/RomM-Swarm/auth"
 	"github.com/Crimson3076/RomM-Swarm/bridge/bridgeconfig"
 	"github.com/Crimson3076/RomM-Swarm/bridge/ingest"
 	"github.com/Crimson3076/RomM-Swarm/bridge/romm"
@@ -43,4 +44,30 @@ type Backend interface {
 	// Journal is where import progress is recorded — used for the activity
 	// view.
 	Journal() *ingest.FileJournal
+
+	// SwarmStatus reports this Bridge's Network Host connection, or the
+	// zero value with Joined false if it has never joined a Swarm.
+	SwarmStatus() (SwarmStatus, error)
+
+	// JoinSwarm redeems an invitation code against a Network Host at
+	// hostURL, generating (or reusing) this Bridge's identity and
+	// persisting the resulting Host connection and credential.
+	JoinSwarm(ctx context.Context, hostURL, code string) (protocol.BridgeID, error)
+
+	// TestSwarmConnection rotates the stored Host credential once, proving
+	// the round trip still works — a manual, operator-triggered check,
+	// mirroring Reconnect/Connection's relationship to the RomM side.
+	TestSwarmConnection(ctx context.Context) (auth.Result, error)
+}
+
+// SwarmStatus is this Bridge's view of its own Network Host connection, as
+// cmd/bridge's Daemon reports it. Defined here rather than in cmd/bridge
+// because a Backend method's return type must be visible to this package,
+// and this package cannot import package main.
+type SwarmStatus struct {
+	Joined      bool
+	HostURL     string
+	BridgeID    protocol.BridgeID
+	Generation  uint64
+	LastRotated time.Time
 }

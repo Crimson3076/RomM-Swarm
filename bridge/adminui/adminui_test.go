@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Crimson3076/RomM-Swarm/auth"
 	"github.com/Crimson3076/RomM-Swarm/bridge/bridgeconfig"
 	"github.com/Crimson3076/RomM-Swarm/bridge/ingest"
 	"github.com/Crimson3076/RomM-Swarm/bridge/romm"
@@ -35,6 +36,21 @@ type fakeBackend struct {
 	startImportCalls []startImportCall
 	startImportErr   error
 	startImportID    protocol.TransferID
+
+	swarmStatus    SwarmStatus
+	swarmStatusErr error
+
+	joinSwarmCalls    []joinSwarmCall
+	joinSwarmErr      error
+	joinSwarmBridgeID protocol.BridgeID
+
+	testSwarmResult auth.Result
+	testSwarmErr    error
+}
+
+type joinSwarmCall struct {
+	HostURL string
+	Code    string
 }
 
 type startImportCall struct {
@@ -81,6 +97,33 @@ func (f *fakeBackend) StartImport(localPath, platformSlug, displayName string, t
 		id = protocol.NewTransferID()
 	}
 	return id, nil
+}
+
+func (f *fakeBackend) SwarmStatus() (SwarmStatus, error) {
+	if f.swarmStatusErr != nil {
+		return SwarmStatus{}, f.swarmStatusErr
+	}
+	return f.swarmStatus, nil
+}
+
+func (f *fakeBackend) JoinSwarm(ctx context.Context, hostURL, code string) (protocol.BridgeID, error) {
+	f.joinSwarmCalls = append(f.joinSwarmCalls, joinSwarmCall{HostURL: hostURL, Code: code})
+	if f.joinSwarmErr != nil {
+		return "", f.joinSwarmErr
+	}
+	id := f.joinSwarmBridgeID
+	if id == "" {
+		id = "brg_test0000000000000000000000000"
+	}
+	f.swarmStatus = SwarmStatus{Joined: true, HostURL: hostURL, BridgeID: id, Generation: 1}
+	return id, nil
+}
+
+func (f *fakeBackend) TestSwarmConnection(ctx context.Context) (auth.Result, error) {
+	if f.testSwarmErr != nil {
+		return auth.Result{}, f.testSwarmErr
+	}
+	return f.testSwarmResult, nil
 }
 
 func newTestServer(t *testing.T) (*Server, *fakeBackend) {
@@ -292,6 +335,60 @@ func TestConnectionTestEndpoint(t *testing.T) {
 	json.NewDecoder(resp.Body).Decode(&parsed)
 	if parsed["connected"] != true {
 		t.Fatalf("connection test body = %v, want connected:true", parsed)
+	}
+}
+
+func TestSwarmPageShowsStatusJoinsAndTestsConnection(t *testing.T) {
+	s, backend := newTestServer(t)
+	hash, err := hashPassword("pw")
+	if err != nil {
+		t.Fatalf("hashPassword: %v", err)
+	}
+	if err := backend.store.Save(bridgeconfig.Config{RommURL: "https://x", RommToken: "t", AdminPasswordHash: hash}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	jar := newJar(t)
+	if resp := doRequest(t, s, jar, http.MethodPost, "/login", url.Values{"password": {"pw"}}); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("login: status %d", resp.StatusCode)
+	}
+
+	// Before joining, the page says so rather than showing stale/zero fields.
+	page := doRequest(t, s, jar, http.MethodGet, "/swarm", nil)
+	if page.StatusCode != http.StatusOK {
+		t.Fatalf("GET /swarm: status %d", page.StatusCode)
+	}
+	body, _ := io.ReadAll(page.Body)
+	if !strings.Contains(string(body), "has not joined a Swarm") {
+		t.Fatalf("swarm page before joining did not say so: %s", body)
+	}
+
+	backend.joinSwarmBridgeID = "brg_test0000000000000000000000000"
+	join := doRequest(t, s, jar, http.MethodPost, "/swarm", url.Values{
+		"host_url":        {"https://host.example.com"},
+		"invitation_code": {"the-code"},
+	})
+	if join.StatusCode != http.StatusOK {
+		joinBody, _ := io.ReadAll(join.Body)
+		t.Fatalf("POST /swarm: status %d, body %s", join.StatusCode, joinBody)
+	}
+	if len(backend.joinSwarmCalls) != 1 || backend.joinSwarmCalls[0].HostURL != "https://host.example.com" || backend.joinSwarmCalls[0].Code != "the-code" {
+		t.Fatalf("JoinSwarm calls = %+v, want one call with the submitted host URL and code", backend.joinSwarmCalls)
+	}
+	joinBody, _ := io.ReadAll(join.Body)
+	if !strings.Contains(string(joinBody), "Joined the Swarm.") || !strings.Contains(string(joinBody), "brg_test0000000000000000000000000") {
+		t.Fatalf("swarm page after joining: %s", joinBody)
+	}
+
+	backend.testSwarmResult = auth.Result{Outcome: auth.OutcomeRotated, Generation: 2}
+	test := doRequest(t, s, jar, http.MethodPost, "/api/swarm/test", url.Values{})
+	if test.StatusCode != http.StatusOK {
+		testBody, _ := io.ReadAll(test.Body)
+		t.Fatalf("POST /api/swarm/test: status %d, body %s", test.StatusCode, testBody)
+	}
+	var parsed map[string]any
+	json.NewDecoder(test.Body).Decode(&parsed)
+	if parsed["connected"] != true || parsed["outcome"] != string(auth.OutcomeRotated) || parsed["generation"] != float64(2) {
+		t.Fatalf("swarm test body = %v, want connected:true outcome:rotated generation:2", parsed)
 	}
 }
 

@@ -8,43 +8,33 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/Crimson3076/RomM-Swarm/auth"
+	"github.com/Crimson3076/RomM-Swarm/bridge/adminui"
 	"github.com/Crimson3076/RomM-Swarm/bridge/hostclient"
 	"github.com/Crimson3076/RomM-Swarm/bridge/swarmconn"
 	"github.com/Crimson3076/RomM-Swarm/protocol"
 )
 
-// SwarmStatus reports this Bridge's Host connection, or the zero value with
-// Joined false if none exists yet.
-type SwarmStatus struct {
-	Joined      bool
-	HostURL     string
-	BridgeID    protocol.BridgeID
-	Generation  uint64
-	LastRotated time.Time
-}
-
 // SwarmStatus implements bridge/adminui.Backend.
-func (d *Daemon) SwarmStatus() (SwarmStatus, error) {
+func (d *Daemon) SwarmStatus() (adminui.SwarmStatus, error) {
 	swarmCfg, err := d.swarmStore.Load()
 	if errors.Is(err, swarmconn.ErrNotJoined) {
-		return SwarmStatus{}, nil
+		return adminui.SwarmStatus{}, nil
 	}
 	if err != nil {
-		return SwarmStatus{}, err
+		return adminui.SwarmStatus{}, err
 	}
 	if !swarmCfg.Configured() {
-		return SwarmStatus{}, nil
+		return adminui.SwarmStatus{}, nil
 	}
 
 	cred, err := d.credentialStore.Load()
 	if err != nil {
-		return SwarmStatus{}, fmt.Errorf("bridge: swarm connection is stored but its credential is not: %w", err)
+		return adminui.SwarmStatus{}, fmt.Errorf("bridge: swarm connection is stored but its credential is not: %w", err)
 	}
 
-	return SwarmStatus{
+	return adminui.SwarmStatus{
 		Joined:      true,
 		HostURL:     swarmCfg.HostURL,
 		BridgeID:    swarmCfg.BridgeID(),
