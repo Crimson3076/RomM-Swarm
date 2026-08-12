@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -53,7 +54,15 @@ func main() {
 	fmt.Println("host: schema applied")
 
 	dir := directory.New(db)
-	apiServer := &http.Server{Addr: *addr, Handler: hostapi.New(dir)}
+	apiHandler := hostapi.New(dir)
+	if raw := strings.TrimSpace(os.Getenv("HOST_MAX_INVENTORY_BYTES")); raw != "" {
+		if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
+			apiHandler.MaxInventoryBytes = n
+		} else {
+			fmt.Fprintf(os.Stderr, "host: ignoring invalid HOST_MAX_INVENTORY_BYTES=%q, using the default\n", raw)
+		}
+	}
+	apiServer := &http.Server{Addr: *addr, Handler: apiHandler}
 	uiServer := &http.Server{Addr: *uiAddr, Handler: hostui.New(dir)}
 
 	// Two independent servers over one Directory: hostapi.Server is

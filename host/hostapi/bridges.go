@@ -17,8 +17,8 @@ type enrollBridgeRequest struct {
 
 func (s *Server) handleEnrollBridge(w http.ResponseWriter, r *http.Request) {
 	var req enrollBridgeRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "could not read the request body: "+err.Error())
+	if err := decodeJSON(w, r, &req, defaultMaxBodyBytes); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	key, err := base64.StdEncoding.DecodeString(req.PublicKey)
@@ -55,8 +55,8 @@ func (s *Server) handleRotateBridge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req rotateBridgeRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "could not read the request body: "+err.Error())
+	if err := decodeJSON(w, r, &req, defaultMaxBodyBytes); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 

@@ -12,8 +12,8 @@ type createSwarmRequest struct {
 
 func (s *Server) handleCreateSwarm(w http.ResponseWriter, r *http.Request) {
 	var req createSwarmRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "could not read the request body")
+	if err := decodeJSON(w, r, &req, defaultMaxBodyBytes); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	if req.Name == "" {
@@ -52,8 +52,8 @@ func (s *Server) handleIssueInvitation(w http.ResponseWriter, r *http.Request) {
 
 	var req issueInvitationRequest
 	if r.ContentLength != 0 {
-		if err := decodeJSON(r, &req); err != nil {
-			writeJSONError(w, http.StatusBadRequest, "could not read the request body: "+err.Error())
+		if err := decodeJSON(w, r, &req, defaultMaxBodyBytes); err != nil {
+			writeDecodeError(w, err)
 			return
 		}
 	}

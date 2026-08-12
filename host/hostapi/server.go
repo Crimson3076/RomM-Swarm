@@ -9,6 +9,8 @@ package hostapi
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -19,6 +21,12 @@ import (
 type Server struct {
 	Directory *directory.Directory
 
+	// MaxInventoryBytes bounds a POST /api/bridges/{id}/inventory request
+	// body. Zero means defaultMaxInventoryBodyBytes. Every other route uses
+	// the much smaller defaultMaxBodyBytes — a manifest is the one payload
+	// in this API with a legitimate reason to be large.
+	MaxInventoryBytes int64
+
 	mux *http.ServeMux
 }
 
@@ -27,6 +35,13 @@ func New(d *directory.Directory) *Server {
 	s := &Server{Directory: d}
 	s.routes()
 	return s
+}
+
+func (s *Server) maxInventoryBytes() int64 {
+	if s.MaxInventoryBytes > 0 {
+		return s.MaxInventoryBytes
+	}
+	return defaultMaxInventoryBodyBytes
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
@@ -52,6 +67,10 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /api/bridges/{bridgeID}/revoke", s.requireOwnerAuth(s.handleRevokeBridge))
 	mux.HandleFunc("POST /api/bridges/{bridgeID}/reenroll", s.requireOwnerAuth(s.handleReenrollBridge))
 
+	// Unauthenticated at the route level, same as enroll/rotate above: the
+	// refresh token in the body is the credential (ADR 0019).
+	mux.HandleFunc("POST /api/bridges/{bridgeID}/inventory", s.handlePublishInventory)
+
 	s.mux = mux
 }
 
@@ -70,10 +89,40 @@ func writeJSONError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-func decodeJSON(r *http.Request, v any) error {
+// defaultMaxBodyBytes bounds every route's request body except inventory
+// publishing — generous for setup/login/swarm/invitation/enroll/rotate
+// bodies, which are all small, fixed-shape JSON, while still closing what
+// was previously an unbounded read.
+const defaultMaxBodyBytes = 1 << 20 // 1 MiB
+
+// defaultMaxInventoryBodyBytes is the default cap for a manifest upload,
+// overridable via Server.MaxInventoryBytes (see cmd/host/main.go's
+// HOST_MAX_INVENTORY_BYTES). A Swarm's full inventory can run to tens of
+// thousands of small JSON items; 64MiB is a generous, explicit default
+// rather than leaving the route unbounded.
+const defaultMaxInventoryBodyBytes = 64 << 20 // 64 MiB
+
+// decodeJSON reads and decodes a JSON body, capped at maxBytes via
+// http.MaxBytesReader so a request body is never read unbounded into
+// memory. A body exceeding maxBytes surfaces as a *http.MaxBytesError,
+// which callers can distinguish from an ordinary decode failure.
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any, maxBytes int64) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	return dec.Decode(v)
+}
+
+// writeDecodeError maps a decodeJSON failure to a response — a body over
+// the size cap gets its own 413, everything else stays the existing 400
+// "could not read the request body" shape.
+func writeDecodeError(w http.ResponseWriter, err error) {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeJSONError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("request body exceeds the %d byte limit", tooLarge.Limit))
+		return
+	}
+	writeJSONError(w, http.StatusBadRequest, "could not read the request body: "+err.Error())
 }
 
 // secondsToDuration turns a JSON-friendly seconds count into a
