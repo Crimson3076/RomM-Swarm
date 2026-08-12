@@ -104,7 +104,7 @@ func (d *Daemon) JoinSwarm(ctx context.Context, hostURL, code string) (protocol.
 	// Best-effort: a failure here is logged, not returned, since the join
 	// itself already succeeded and must not be reported as failed over it.
 	go func() {
-		publishCtx, cancel := context.WithTimeout(context.Background(), autoPublishTimeout)
+		publishCtx, cancel := context.WithTimeout(context.Background(), publishTimeoutFromEnv())
 		defer cancel()
 		if _, err := d.PublishInventory(publishCtx); err != nil {
 			fmt.Fprintf(os.Stderr, "bridge: initial inventory publish after joining failed: %v\n", err)

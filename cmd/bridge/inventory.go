@@ -16,13 +16,6 @@ import (
 	"github.com/Crimson3076/RomM-Swarm/protocol"
 )
 
-// autoPublishTimeout bounds one automatic (startup, post-join, or
-// scheduled) publish attempt — see autopublish.go. Generous, since a
-// full-catalogue scan-and-publish legitimately takes a while, but bounded
-// so a hung Host or RomM connection can never wedge a scheduled tick
-// forever.
-const autoPublishTimeout = 5 * time.Minute
-
 // scanHoldings scans every protocol.InitialPlatforms() platform the
 // connected RomM server actually has, using whatever reference Selection
 // is loaded for that platform. A platform with no Selection isn't skipped
@@ -220,7 +213,7 @@ func (d *Daemon) TriggerPublishInventory() adminui.PublishStatus {
 		d.startPublishStatus()
 		go func() {
 			defer d.publishTriggering.Store(false)
-			ctx, cancel := context.WithTimeout(context.Background(), autoPublishTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), publishTimeoutFromEnv())
 			defer cancel()
 			d.PublishInventory(ctx)
 		}()

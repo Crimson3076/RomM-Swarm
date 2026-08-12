@@ -33,6 +33,32 @@ func publishIntervalFromEnv() time.Duration {
 	return time.Duration(minutes) * time.Minute
 }
 
+// DefaultPublishTimeout bounds one whole publish attempt — every platform's
+// scan plus the final upload — when BRIDGE_PUBLISH_TIMEOUT_MINUTES isn't
+// set. Raised from an original 5 minutes after an operator report: a
+// Bridge whose RomM server isn't on the same local network (so every list
+// and download request is markedly slower) legitimately needs much longer
+// to get through all of protocol.InitialPlatforms(), especially with large
+// Nintendo DS dumps (up to 512MiB, ADR 0004) in the mix. Still bounded, so
+// a genuinely hung Host or RomM connection can't wedge a scheduled tick
+// forever.
+const DefaultPublishTimeout = 30 * time.Minute
+
+// publishTimeoutFromEnv resolves BRIDGE_PUBLISH_TIMEOUT_MINUTES, the same
+// fallback shape as publishIntervalFromEnv.
+func publishTimeoutFromEnv() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("BRIDGE_PUBLISH_TIMEOUT_MINUTES"))
+	if raw == "" {
+		return DefaultPublishTimeout
+	}
+	minutes, err := strconv.Atoi(raw)
+	if err != nil || minutes <= 0 {
+		fmt.Fprintf(os.Stderr, "bridge: BRIDGE_PUBLISH_TIMEOUT_MINUTES=%q is not a positive integer; using the %s default\n", raw, DefaultPublishTimeout)
+		return DefaultPublishTimeout
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
 // StartAutoPublish runs PublishInventory once immediately — covering a
 // container restart, so the Host isn't left showing stale data for a full
 // interval — and then again on every tick of interval, for as long as the
@@ -82,7 +108,7 @@ func (d *Daemon) startAutoPublishFromTicks(ctx context.Context, ticks <-chan tim
 // normal steady state before a first Swarm join, not worth logging on
 // every tick.
 func (d *Daemon) attemptAutoPublish(ctx context.Context) {
-	publishCtx, cancel := context.WithTimeout(ctx, autoPublishTimeout)
+	publishCtx, cancel := context.WithTimeout(ctx, publishTimeoutFromEnv())
 	defer cancel()
 
 	result, err := d.PublishInventory(publishCtx)

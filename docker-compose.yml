@@ -44,6 +44,14 @@ services:
       SWARM_REFERENCE_DAT_GBA: ${SWARM_REFERENCE_DAT_GBA:-}
       SWARM_REFERENCE_DAT_NDS: ${SWARM_REFERENCE_DAT_NDS:-}
       SWARM_REFERENCE_DAT_GENESIS: ${SWARM_REFERENCE_DAT_GENESIS:-}
+      # Optional tuning for a RomM server that isn't on the same local
+      # network as this Bridge, where every list/download request is
+      # markedly slower than the 30s/5min defaults assume. Raise either if
+      # a publish fails with "context deadline exceeded" partway through a
+      # scan. Leave unset for the built-in defaults (2 minutes per HTTP
+      # request, 30 minutes per whole publish attempt).
+      BRIDGE_ROMM_HTTP_TIMEOUT_SECONDS: ${BRIDGE_ROMM_HTTP_TIMEOUT_SECONDS:-}
+      BRIDGE_PUBLISH_TIMEOUT_MINUTES: ${BRIDGE_PUBLISH_TIMEOUT_MINUTES:-}
 
   # Network Host (ADR 0016, slice 1): accounts, Swarms, memberships,
   # invitations, Bridge enrollment/rotation/revocation. Independent of the

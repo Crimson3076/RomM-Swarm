@@ -146,6 +146,13 @@ func (d *Daemon) Reconnect(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// bridge/romm.NewClient's own default (30s) is tuned for a same-LAN
+	// RomM connection; scanning routinely needs longer for a Bridge and
+	// its RomM server on opposite ends of a slower link — see
+	// rommHTTPTimeoutFromEnv's own doc comment. conn.Client is freshly
+	// constructed and not yet shared with any other goroutine at this
+	// point, so mutating it here is safe.
+	conn.Client.HTTP.Timeout = rommHTTPTimeoutFromEnv()
 	d.conn.Store(conn)
 	d.invalidateLibraryCache()
 	return nil

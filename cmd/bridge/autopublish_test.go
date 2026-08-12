@@ -42,6 +42,31 @@ func TestPublishIntervalFromEnvFallsBackOnAnInvalidValue(t *testing.T) {
 	}
 }
 
+func TestPublishTimeoutFromEnvDefaultsWhenUnset(t *testing.T) {
+	if got := publishTimeoutFromEnv(); got != DefaultPublishTimeout {
+		t.Fatalf("publishTimeoutFromEnv() = %v, want the default %v", got, DefaultPublishTimeout)
+	}
+}
+
+func TestPublishTimeoutFromEnvUsesACustomValue(t *testing.T) {
+	t.Setenv("BRIDGE_PUBLISH_TIMEOUT_MINUTES", "45")
+	if got := publishTimeoutFromEnv(); got != 45*time.Minute {
+		t.Fatalf("publishTimeoutFromEnv() = %v, want 45m", got)
+	}
+}
+
+func TestPublishTimeoutFromEnvFallsBackOnAnInvalidValue(t *testing.T) {
+	t.Setenv("BRIDGE_PUBLISH_TIMEOUT_MINUTES", "not-a-number")
+	if got := publishTimeoutFromEnv(); got != DefaultPublishTimeout {
+		t.Fatalf("publishTimeoutFromEnv() = %v, want the default on a non-numeric value", got)
+	}
+
+	t.Setenv("BRIDGE_PUBLISH_TIMEOUT_MINUTES", "-5")
+	if got := publishTimeoutFromEnv(); got != DefaultPublishTimeout {
+		t.Fatalf("publishTimeoutFromEnv() = %v, want the default on a non-positive value", got)
+	}
+}
+
 // setUpPublishableDaemon wires a Daemon that's already joined (via
 // joinedDaemon, inventory_test.go) with a real scan target and a loaded
 // reference.Selection, so PublishInventory has real, publishable content

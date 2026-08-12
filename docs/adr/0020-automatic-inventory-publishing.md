@@ -117,6 +117,28 @@ soon as it returns).
   briefly behind a concurrent one, which is correct today (nothing calls
   it from a latency-sensitive path) and worth remembering if that changes.
 
+## Update (2026-08-12): timeouts raised for a Bridge not on RomM's local network
+
+The per-attempt timeout wrapping every `PublishInventory` call (`5 minutes`
+originally, an internal constant not otherwise discussed above) proved too
+tight for real usage: an operator whose Bridge and RomM server aren't on
+the same local network hit `context deadline exceeded` partway through a
+scan, on top of `bridge/romm.Client`'s own separate, hard-coded 30-second
+per-HTTP-request timeout (tuned for a same-LAN connection) failing
+individual list/download calls even sooner.
+
+Both are now configurable and raised: `DefaultPublishTimeout` (30 minutes,
+`BRIDGE_PUBLISH_TIMEOUT_MINUTES`, `cmd/bridge/autopublish.go`) bounds the
+whole attempt across every platform; `DefaultRommHTTPTimeout` (2 minutes,
+`BRIDGE_ROMM_HTTP_TIMEOUT_SECONDS`, `cmd/bridge/rommtimeout.go`) is applied
+to the live `romm.Client`'s `HTTP.Timeout` right after `Reconnect`
+succeeds, overriding `bridge/romm`'s own same-LAN-tuned default for every
+subsequent list and download call a scan makes. Neither change touches
+`bridge/romm` itself — that package's default stays correct for its own
+tests and for the common same-LAN case; the override is entirely at the
+`cmd/bridge` layer, the same pattern `BRIDGE_PUBLISH_INTERVAL_MINUTES`
+already established.
+
 ## Explicitly out of scope
 
 - **Container-stop triggered publishing.** There is nothing new to publish
