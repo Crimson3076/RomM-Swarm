@@ -17,6 +17,7 @@ import (
 	"github.com/Crimson3076/RomM-Swarm/bridge/scan"
 	"github.com/Crimson3076/RomM-Swarm/bridge/swarmconn"
 	"github.com/Crimson3076/RomM-Swarm/protocol"
+	"github.com/Crimson3076/RomM-Swarm/reference"
 	"github.com/Crimson3076/RomM-Swarm/verify"
 )
 
@@ -47,6 +48,13 @@ type Daemon struct {
 	// field, not an interface.
 	swarmStore      *swarmconn.FileStore
 	credentialStore *auth.FileStore
+
+	// referenceSelections holds whatever reference catalogue has been
+	// loaded per platform (ADR 0019) — see inventory.go and bootstrap.go.
+	// Nil for a platform means no catalogue is loaded yet; scanHoldings
+	// reports every item on that platform as skipped rather than silently
+	// omitting it.
+	referenceSelections map[protocol.PlatformID]*reference.Selection
 
 	conn atomic.Pointer[romm.Connection]
 }
@@ -79,11 +87,12 @@ func NewDaemon(configDir string) (*Daemon, error) {
 	credentialStore := auth.NewFileStore(filepath.Join(configDir, "swarm-credential.json"))
 
 	return &Daemon{
-		configStore:     store,
-		journal:         journal,
-		staging:         staging,
-		swarmStore:      swarmStore,
-		credentialStore: credentialStore,
+		configStore:         store,
+		journal:             journal,
+		staging:             staging,
+		swarmStore:          swarmStore,
+		credentialStore:     credentialStore,
+		referenceSelections: map[protocol.PlatformID]*reference.Selection{},
 	}, nil
 }
 
