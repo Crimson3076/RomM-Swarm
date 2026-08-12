@@ -1,6 +1,9 @@
 package hostui_test
 
 import (
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -14,13 +17,14 @@ import (
 	"github.com/Crimson3076/RomM-Swarm/host/hostui"
 )
 
-func newTestServer(t *testing.T) *httptest.Server {
+func newTestServer(t *testing.T) (*httptest.Server, *directory.Directory) {
 	t.Helper()
 	dsn := hoststoretest.SkipWithoutPostgres(t)
 	db := hoststoretest.OpenDB(t, dsn)
-	srv := httptest.NewServer(hostui.New(directory.New(db)))
+	dir := directory.New(db)
+	srv := httptest.NewServer(hostui.New(dir))
 	t.Cleanup(srv.Close)
-	return srv
+	return srv, dir
 }
 
 func newClient(t *testing.T) *http.Client {
@@ -36,7 +40,7 @@ func newClient(t *testing.T) *http.Client {
 }
 
 func TestPhase2_SetupRedirectsToLoginOnceConfigured(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	client := newClient(t)
 
 	// First /setup: unconfigured, shows the form (200).
@@ -72,7 +76,7 @@ func TestPhase2_SetupRedirectsToLoginOnceConfigured(t *testing.T) {
 }
 
 func TestPhase2_FullBrowserHappyPathSetupLoginEmptyDashboard(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	client := newClient(t)
 
 	form := url.Values{
@@ -132,7 +136,7 @@ func TestPhase2_FullBrowserHappyPathSetupLoginEmptyDashboard(t *testing.T) {
 }
 
 func TestPhase2_LoginRejectsWrongPassword(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	client := newClient(t)
 
 	form := url.Values{
@@ -151,6 +155,124 @@ func TestPhase2_LoginRejectsWrongPassword(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("POST /login with the wrong password: status %d, want 401", resp.StatusCode)
 	}
+}
+
+func TestPhase2_SwarmLifecycleCreateInviteRevokeReenroll(t *testing.T) {
+	srv, dir := newTestServer(t)
+	client := newClient(t)
+
+	form := url.Values{
+		"username": {"owner"}, "display_name": {"The Owner"},
+		"password": {"a-long-enough-password"}, "password_confirm": {"a-long-enough-password"},
+	}
+	if _, err := client.PostForm(srv.URL+"/setup", form); err != nil {
+		t.Fatalf("POST /setup: %v", err)
+	}
+
+	resp, err := client.PostForm(srv.URL+"/swarms", url.Values{"name": {"Test Swarm"}})
+	if err != nil {
+		t.Fatalf("POST /swarms: %v", err)
+	}
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("POST /swarms: status %d", resp.StatusCode)
+	}
+	swarmPath := resp.Header.Get("Location")
+	if !strings.HasPrefix(swarmPath, "/swarms/") {
+		t.Fatalf("POST /swarms: unexpected redirect location %q", swarmPath)
+	}
+
+	resp, err = client.Get(srv.URL + swarmPath)
+	if err != nil {
+		t.Fatalf("GET %s: %v", swarmPath, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s: status %d", swarmPath, resp.StatusCode)
+	}
+	body, _ := readAll(resp)
+	if !strings.Contains(body, "Test Swarm") {
+		t.Fatalf("Swarm page did not show the Swarm name: %s", body)
+	}
+
+	// Issuing an invitation shows the code exactly once.
+	resp, err = client.PostForm(srv.URL+swarmPath+"/invitations", nil)
+	if err != nil {
+		t.Fatalf("POST %s/invitations: %v", swarmPath, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST %s/invitations: status %d", swarmPath, resp.StatusCode)
+	}
+	body, _ = readAll(resp)
+	if !strings.Contains(body, "will not be shown again") {
+		t.Fatalf("invitation page missing one-time warning: %s", body)
+	}
+	code := extractCodeDisplay(t, body)
+
+	// Redeem the invitation directly against the Directory to enroll a
+	// real test Bridge -- the same convention host/hostapi's own tests
+	// use, since bridge/hostclient isn't needed to exercise this UI.
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ed25519.GenerateKey: %v", err)
+	}
+	bridgeID, _, err := dir.RedeemInvitation(context.Background(), directory.InvitationCode(code), pub)
+	if err != nil {
+		t.Fatalf("RedeemInvitation: %v", err)
+	}
+
+	resp, err = client.Get(srv.URL + swarmPath)
+	if err != nil {
+		t.Fatalf("GET %s: %v", swarmPath, err)
+	}
+	body, _ = readAll(resp)
+	if !strings.Contains(body, string(bridgeID)) {
+		t.Fatalf("Swarm page did not list the enrolled Bridge: %s", body)
+	}
+
+	// Revoke it.
+	resp, err = client.PostForm(srv.URL+swarmPath+"/bridges/"+string(bridgeID)+"/revoke", nil)
+	if err != nil {
+		t.Fatalf("POST revoke: %v", err)
+	}
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("POST revoke: status %d", resp.StatusCode)
+	}
+
+	resp, err = client.Get(srv.URL + swarmPath)
+	if err != nil {
+		t.Fatalf("GET %s: %v", swarmPath, err)
+	}
+	body, _ = readAll(resp)
+	if !strings.Contains(body, "revoked") {
+		t.Fatalf("Swarm page did not show the Bridge as revoked: %s", body)
+	}
+
+	// Re-enroll it: the owner-authorised escape from a revoked family.
+	resp, err = client.PostForm(srv.URL+swarmPath+"/bridges/"+string(bridgeID)+"/reenroll", nil)
+	if err != nil {
+		t.Fatalf("POST reenroll: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST reenroll: status %d", resp.StatusCode)
+	}
+	body, _ = readAll(resp)
+	if !strings.Contains(body, "will not be shown again") {
+		t.Fatalf("reenroll page missing one-time warning: %s", body)
+	}
+}
+
+func extractCodeDisplay(t *testing.T, body string) string {
+	t.Helper()
+	const marker = `class="code-display">`
+	i := strings.Index(body, marker)
+	if i < 0 {
+		t.Fatalf("no code-display element found: %s", body)
+	}
+	rest := body[i+len(marker):]
+	j := strings.Index(rest, "<")
+	if j < 0 {
+		t.Fatalf("malformed code-display element: %s", body)
+	}
+	return rest[:j]
 }
 
 func readAll(resp *http.Response) (string, error) {

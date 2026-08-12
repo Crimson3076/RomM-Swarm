@@ -1,0 +1,60 @@
+{{define "swarm"}}{{template "header" .}}
+<h1>{{.Swarm.Name}}</h1>
+<p class="hint">Swarm ID: {{.Swarm.ID}}</p>
+
+<div class="card">
+  <h2>Invitations</h2>
+  {{if .Invitations}}
+  <table class="table">
+    <thead><tr><th>ID</th><th>Uses</th><th>Expires</th><th>Status</th></tr></thead>
+    <tbody>
+    {{range .Invitations}}
+      <tr>
+        <td>{{.ID}}</td>
+        <td>{{.UseCount}}/{{.MaxUses}}</td>
+        <td>{{.ExpiresAt}}</td>
+        <td>{{if .Revoked}}<span class="status-bad">revoked</span>{{else}}<span class="status-ok">active</span>{{end}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p>No invitations issued yet.</p>
+  {{end}}
+
+  <form method="post" action="/swarms/{{.Swarm.ID}}/invitations" class="form">
+    <button type="submit">Issue invitation</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Bridges</h2>
+  {{if .Bridges}}
+  <table class="table">
+    <thead><tr><th>Bridge ID</th><th>Joined</th><th>State</th><th>Credential</th><th></th></tr></thead>
+    <tbody>
+    {{range .Bridges}}
+      <tr>
+        <td>{{.ID}}</td>
+        <td>{{.JoinedAt}}</td>
+        <td>{{.State}}</td>
+        <td>{{if .CredentialRevoked}}<span class="status-bad">revoked</span>{{else}}<span class="status-ok">active</span>{{end}}</td>
+        <td>
+          <form method="post" action="/swarms/{{$.Swarm.ID}}/bridges/{{.ID}}/revoke" class="form-inline">
+            <button type="submit" class="link-button" onclick="return confirm('Revoke this Bridge’s credential? This revokes it across every Swarm it belongs to, not just this one.');">Revoke</button>
+          </form>
+          {{if .CredentialRevoked}}
+          <form method="post" action="/swarms/{{$.Swarm.ID}}/bridges/{{.ID}}/reenroll" class="form-inline">
+            <button type="submit" class="link-button">Re-enroll</button>
+          </form>
+          {{end}}
+        </td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p>No Bridges enrolled in this Swarm yet.</p>
+  {{end}}
+</div>
+{{template "footer" .}}{{end}}

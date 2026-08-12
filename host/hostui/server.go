@@ -58,6 +58,11 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /logout", s.requireAuth(s.handleLogout))
 
 	mux.HandleFunc("GET /{$}", s.requireBootstrappedAndAuth(s.handleDashboard))
+	mux.HandleFunc("POST /swarms", s.requireBootstrappedAndAuth(s.handleCreateSwarm))
+	mux.HandleFunc("GET /swarms/{swarmID}", s.requireBootstrappedAndAuth(s.handleSwarmView))
+	mux.HandleFunc("POST /swarms/{swarmID}/invitations", s.requireBootstrappedAndAuth(s.handleIssueInvitation))
+	mux.HandleFunc("POST /swarms/{swarmID}/bridges/{bridgeID}/revoke", s.requireBootstrappedAndAuth(s.handleRevokeBridge))
+	mux.HandleFunc("POST /swarms/{swarmID}/bridges/{bridgeID}/reenroll", s.requireBootstrappedAndAuth(s.handleReenrollBridge))
 
 	s.mux = mux
 }
