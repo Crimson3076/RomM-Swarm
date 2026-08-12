@@ -92,6 +92,37 @@ CREATE TABLE IF NOT EXISTS bridge_credential_families (
     updated_at         TIMESTAMPTZ NOT NULL
 );
 
+-- ADR 0019, slice 1: latest inventory snapshot metadata per (Bridge,
+-- Swarm). No history, no Delta replay -- a republish overwrites the
+-- previous snapshot wholesale, via InventoryStore.Replace's transaction.
+CREATE TABLE IF NOT EXISTS inventory_snapshots (
+    bridge_id     TEXT NOT NULL REFERENCES bridges(id),
+    swarm_id      TEXT NOT NULL REFERENCES swarms(id),
+    revision      BIGINT NOT NULL,
+    item_count    INTEGER NOT NULL,
+    total_bytes   BIGINT NOT NULL,
+    fingerprints  JSONB NOT NULL DEFAULT '{}',
+    generated_at  TIMESTAMPTZ NOT NULL,
+    published_at  TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (bridge_id, swarm_id)
+);
+
+-- One row per published item, replaced wholesale on every publish. This
+-- deliberately carries only what slice-1 cross-Bridge stats need (file id,
+-- platform, size) -- not the full protocol.Item (no classification,
+-- reference match, container, or adapter detail). That is the "central
+-- inventory index" ADR 0016 named out of scope; this is a narrow,
+-- purpose-built stats table, not it. See ADR 0019.
+CREATE TABLE IF NOT EXISTS inventory_items (
+    bridge_id      TEXT NOT NULL REFERENCES bridges(id),
+    swarm_id       TEXT NOT NULL REFERENCES swarms(id),
+    file_id        TEXT NOT NULL,
+    platform       TEXT NOT NULL,
+    canonical_size BIGINT NOT NULL,
+    PRIMARY KEY (bridge_id, swarm_id, file_id)
+);
+CREATE INDEX IF NOT EXISTS inventory_items_by_swarm_file ON inventory_items (swarm_id, file_id);
+
 -- No sweeper reads or deletes from this table yet; see the file comment.
 CREATE TABLE IF NOT EXISTS events (
     id           BIGSERIAL PRIMARY KEY,
