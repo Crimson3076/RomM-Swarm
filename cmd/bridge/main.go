@@ -51,6 +51,9 @@ func main() {
 	if err := d.Bootstrap(bootstrapCtx); err != nil {
 		fmt.Fprintf(os.Stderr, "bridge: %v\n", err)
 	}
+	if err := d.BootstrapSwarm(bootstrapCtx); err != nil {
+		fmt.Fprintf(os.Stderr, "bridge: %v\n", err)
+	}
 	cancelBootstrap()
 
 	cfg, err := d.ConfigStore().Load()

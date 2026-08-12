@@ -9,11 +9,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Crimson3076/RomM-Swarm/auth"
 	"github.com/Crimson3076/RomM-Swarm/bridge/bridgeconfig"
 	"github.com/Crimson3076/RomM-Swarm/bridge/destination"
 	"github.com/Crimson3076/RomM-Swarm/bridge/ingest"
 	"github.com/Crimson3076/RomM-Swarm/bridge/romm"
 	"github.com/Crimson3076/RomM-Swarm/bridge/scan"
+	"github.com/Crimson3076/RomM-Swarm/bridge/swarmconn"
 	"github.com/Crimson3076/RomM-Swarm/protocol"
 	"github.com/Crimson3076/RomM-Swarm/verify"
 )
@@ -35,6 +37,16 @@ type Daemon struct {
 	configStore *bridgeconfig.FileStore
 	journal     *ingest.FileJournal
 	staging     *destination.Staging
+
+	// swarmStore and credentialStore back ADR 0017's Host-enrollment
+	// wiring — see swarm.go. Two separate stores, not one: swarmStore
+	// holds the Host URL and this Bridge's Ed25519 identity key
+	// (bridge/swarmconn.Config); credentialStore holds the rotating
+	// refresh credential (auth.Credential), reusing auth.FileStore
+	// verbatim since auth.Client.Store is a concrete *auth.FileStore
+	// field, not an interface.
+	swarmStore      *swarmconn.FileStore
+	credentialStore *auth.FileStore
 
 	conn atomic.Pointer[romm.Connection]
 }
@@ -63,7 +75,16 @@ func NewDaemon(configDir string) (*Daemon, error) {
 		return nil, err
 	}
 
-	return &Daemon{configStore: store, journal: journal, staging: staging}, nil
+	swarmStore := swarmconn.NewFileStore(filepath.Join(configDir, "swarm-connection.json"))
+	credentialStore := auth.NewFileStore(filepath.Join(configDir, "swarm-credential.json"))
+
+	return &Daemon{
+		configStore:     store,
+		journal:         journal,
+		staging:         staging,
+		swarmStore:      swarmStore,
+		credentialStore: credentialStore,
+	}, nil
 }
 
 // ConfigStore implements bridge/adminui.Backend.
