@@ -64,6 +64,28 @@ services:
       timeout: 5s
       retries: 10
 
+  # Runs the whole test suite, including the Postgres-gated host/... tests,
+  # with no requirement on the host machine beyond Docker itself — no local
+  # Go toolchain, no local Postgres install. Reuses the same postgres
+  # service the host container uses; hoststoretest.OpenDB gives each test
+  # its own throwaway schema within it, so sharing the database is safe.
+  # Usage: docker compose run --rm test
+  test:
+    image: golang:1.24-alpine
+    working_dir: /src
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/src
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+    environment:
+      TEST_POSTGRES_DSN: postgres://host:${HOST_POSTGRES_PASSWORD:-host}@postgres:5432/host?sslmode=disable
+    command: go test ./... -race
+
 volumes:
   bridge-data:
   host-postgres-data:
+  go-mod-cache:
+  go-build-cache:
