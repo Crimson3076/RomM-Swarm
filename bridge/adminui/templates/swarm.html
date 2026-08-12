@@ -13,6 +13,19 @@
   {{end}}
 </div>
 
+{{if .Joined}}
+<div class="card">
+  <h2>Inventory</h2>
+  {{if .LastPublishedRevision}}
+  <p class="hint">Last published: revision {{.LastPublishedRevision}} at {{.LastPublishedAt}}</p>
+  {{else}}
+  <p class="hint">Never published.</p>
+  {{end}}
+  <button type="button" id="publish-inventory">Publish Inventory</button>
+  <span id="publish-inventory-result"></span>
+</div>
+{{end}}
+
 <div class="card">
   <h2>{{if .Joined}}Join a different Swarm{{else}}Join a Swarm{{end}}</h2>
   <form method="post" action="/swarm" class="form">

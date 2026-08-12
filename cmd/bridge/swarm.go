@@ -35,11 +35,13 @@ func (d *Daemon) SwarmStatus() (adminui.SwarmStatus, error) {
 	}
 
 	return adminui.SwarmStatus{
-		Joined:      true,
-		HostURL:     swarmCfg.HostURL,
-		BridgeID:    swarmCfg.BridgeID(),
-		Generation:  cred.Generation,
-		LastRotated: cred.PersistedAt,
+		Joined:                true,
+		HostURL:               swarmCfg.HostURL,
+		BridgeID:              swarmCfg.BridgeID(),
+		Generation:            cred.Generation,
+		LastRotated:           cred.PersistedAt,
+		LastPublishedRevision: swarmCfg.LastPublishedRevision,
+		LastPublishedAt:       swarmCfg.LastPublishedAt,
 	}, nil
 }
 

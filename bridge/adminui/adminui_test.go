@@ -46,6 +46,10 @@ type fakeBackend struct {
 
 	testSwarmResult auth.Result
 	testSwarmErr    error
+
+	publishInventoryResult InventoryPublishResult
+	publishInventoryErr    error
+	publishInventoryCalls  int
 }
 
 type joinSwarmCall struct {
@@ -124,6 +128,14 @@ func (f *fakeBackend) TestSwarmConnection(ctx context.Context) (auth.Result, err
 		return auth.Result{}, f.testSwarmErr
 	}
 	return f.testSwarmResult, nil
+}
+
+func (f *fakeBackend) PublishInventory(ctx context.Context) (InventoryPublishResult, error) {
+	f.publishInventoryCalls++
+	if f.publishInventoryErr != nil {
+		return InventoryPublishResult{}, f.publishInventoryErr
+	}
+	return f.publishInventoryResult, nil
 }
 
 func newTestServer(t *testing.T) (*Server, *fakeBackend) {
@@ -389,6 +401,99 @@ func TestSwarmPageShowsStatusJoinsAndTestsConnection(t *testing.T) {
 	json.NewDecoder(test.Body).Decode(&parsed)
 	if parsed["connected"] != true || parsed["outcome"] != string(auth.OutcomeRotated) || parsed["generation"] != float64(2) {
 		t.Fatalf("swarm test body = %v, want connected:true outcome:rotated generation:2", parsed)
+	}
+}
+
+func TestPublishInventoryButtonPostsAndTheNewRevisionRendersOnThePage(t *testing.T) {
+	s, backend := newTestServer(t)
+	hash, err := hashPassword("pw")
+	if err != nil {
+		t.Fatalf("hashPassword: %v", err)
+	}
+	if err := backend.store.Save(bridgeconfig.Config{RommURL: "https://x", RommToken: "t", AdminPasswordHash: hash}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	jar := newJar(t)
+	if resp := doRequest(t, s, jar, http.MethodPost, "/login", url.Values{"password": {"pw"}}); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("login: status %d", resp.StatusCode)
+	}
+
+	backend.swarmStatus = SwarmStatus{Joined: true, HostURL: "https://host.example.com", BridgeID: "brg_test0000000000000000000000000"}
+
+	page := doRequest(t, s, jar, http.MethodGet, "/swarm", nil)
+	body, _ := io.ReadAll(page.Body)
+	if !strings.Contains(string(body), "Never published.") {
+		t.Fatalf("swarm page before any publish did not say so: %s", body)
+	}
+	if !strings.Contains(string(body), "publish-inventory") {
+		t.Fatalf("swarm page did not render the Publish Inventory button: %s", body)
+	}
+
+	backend.publishInventoryResult = InventoryPublishResult{Published: true, ItemCount: 3, DistinctFiles: 5, Revision: 2}
+	resp := doRequest(t, s, jar, http.MethodPost, "/api/swarm/publish-inventory", url.Values{})
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST /api/swarm/publish-inventory: status %d, body %s", resp.StatusCode, respBody)
+	}
+	var parsed map[string]any
+	json.NewDecoder(resp.Body).Decode(&parsed)
+	if parsed["published"] != true || parsed["item_count"] != float64(3) || parsed["distinct_files"] != float64(5) || parsed["revision"] != float64(2) {
+		t.Fatalf("publish-inventory body = %v, want published:true item_count:3 distinct_files:5 revision:2", parsed)
+	}
+	if backend.publishInventoryCalls != 1 {
+		t.Fatalf("PublishInventory was called %d times, want 1", backend.publishInventoryCalls)
+	}
+
+	// The page reflects the new revision once SwarmStatus (as cmd/bridge's
+	// Daemon really would after a successful publish) reports it — the
+	// button's own JSON response and the page's persisted status are two
+	// independent paths to the same fact, and both must agree.
+	backend.swarmStatus.LastPublishedRevision = 2
+	backend.swarmStatus.LastPublishedAt = time.Now()
+	page2 := doRequest(t, s, jar, http.MethodGet, "/swarm", nil)
+	body2, _ := io.ReadAll(page2.Body)
+	if !strings.Contains(string(body2), "revision 2") {
+		t.Fatalf("swarm page after publish did not show the new revision: %s", body2)
+	}
+}
+
+// TestPublishInventoryWithNothingToPublishIsAClearMessageNotA500 proves
+// publish.ErrNothingToPublish's real, expected default state (no reference
+// catalogue loaded yet) surfaces to the operator as a plain, readable
+// result — not a 500, and not silently swallowed either.
+func TestPublishInventoryWithNothingToPublishIsAClearMessageNotA500(t *testing.T) {
+	s, backend := newTestServer(t)
+	hash, err := hashPassword("pw")
+	if err != nil {
+		t.Fatalf("hashPassword: %v", err)
+	}
+	if err := backend.store.Save(bridgeconfig.Config{RommURL: "https://x", RommToken: "t", AdminPasswordHash: hash}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	jar := newJar(t)
+	if resp := doRequest(t, s, jar, http.MethodPost, "/login", url.Values{"password": {"pw"}}); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("login: status %d", resp.StatusCode)
+	}
+	backend.swarmStatus = SwarmStatus{Joined: true, HostURL: "https://host.example.com", BridgeID: "brg_test0000000000000000000000000"}
+	backend.publishInventoryResult = InventoryPublishResult{
+		Published:    false,
+		SkippedCount: 4,
+		SkipReasons:  map[string]int{"no reference catalogue is loaded for this platform, so nothing on it can be verified": 4},
+	}
+
+	resp := doRequest(t, s, jar, http.MethodPost, "/api/swarm/publish-inventory", url.Values{})
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST /api/swarm/publish-inventory with nothing to publish: status %d, body %s", resp.StatusCode, respBody)
+	}
+	var parsed map[string]any
+	json.NewDecoder(resp.Body).Decode(&parsed)
+	if parsed["published"] != false {
+		t.Fatalf("publish-inventory body = %v, want published:false", parsed)
+	}
+	reasons, _ := parsed["skip_reasons"].(map[string]any)
+	if len(reasons) == 0 {
+		t.Fatalf("publish-inventory body did not carry skip_reasons: %v", parsed)
 	}
 }
 

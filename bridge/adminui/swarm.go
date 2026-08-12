@@ -15,6 +15,12 @@ type swarmPageData struct {
 	BridgeID    string
 	Generation  uint64
 	LastRotated string
+
+	// LastPublishedRevision and LastPublishedAt report this Bridge's most
+	// recent successful inventory publish (ADR 0019). LastPublishedRevision
+	// is zero when nothing has ever been published.
+	LastPublishedRevision uint64
+	LastPublishedAt       string
 }
 
 func (s *Server) swarmPageDataFrom(r *http.Request) swarmPageData {
@@ -30,6 +36,10 @@ func (s *Server) swarmPageDataFrom(r *http.Request) swarmPageData {
 	data.Generation = status.Generation
 	if !status.LastRotated.IsZero() {
 		data.LastRotated = status.LastRotated.Format(time.RFC3339)
+	}
+	data.LastPublishedRevision = uint64(status.LastPublishedRevision)
+	if !status.LastPublishedAt.IsZero() {
+		data.LastPublishedAt = status.LastPublishedAt.Format(time.RFC3339)
 	}
 	return data
 }
@@ -85,5 +95,31 @@ func (s *Server) handleSwarmTest(w http.ResponseWriter, r *http.Request) {
 		"connected":  true,
 		"outcome":    string(result.Outcome),
 		"generation": result.Generation,
+	})
+}
+
+// publishInventoryTimeout is generous relative to handleSwarmTest's default
+// request handling — a full-catalogue scan-and-publish can take far longer
+// than a credential rotation, since it downloads and hashes every holding.
+const publishInventoryTimeout = 10 * time.Minute
+
+// handlePublishInventory wraps PublishInventory for the page's "Publish
+// Inventory" button, mirroring handleSwarmTest's JSON-response shape.
+func (s *Server) handlePublishInventory(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), publishInventoryTimeout)
+	defer cancel()
+	result, err := s.Backend.PublishInventory(ctx)
+	if err != nil {
+		writeJSONError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"published":      result.Published,
+		"item_count":     result.ItemCount,
+		"skipped_count":  result.SkippedCount,
+		"distinct_files": result.DistinctFiles,
+		"revision":       uint64(result.Revision),
+		"skip_reasons":   result.SkipReasons,
 	})
 }

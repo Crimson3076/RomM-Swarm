@@ -58,6 +58,11 @@ type Backend interface {
 	// the round trip still works — a manual, operator-triggered check,
 	// mirroring Reconnect/Connection's relationship to the RomM side.
 	TestSwarmConnection(ctx context.Context) (auth.Result, error)
+
+	// PublishInventory scans local holdings, builds this Swarm's manifest,
+	// and sends it to the Host — the manual, operator-triggered action
+	// behind the Swarm page's "Publish Inventory" button (ADR 0019).
+	PublishInventory(ctx context.Context) (InventoryPublishResult, error)
 }
 
 // SwarmStatus is this Bridge's view of its own Network Host connection, as
@@ -70,4 +75,31 @@ type SwarmStatus struct {
 	BridgeID    protocol.BridgeID
 	Generation  uint64
 	LastRotated time.Time
+
+	// LastPublishedRevision and LastPublishedAt report this Bridge's most
+	// recent successful inventory publish (ADR 0019). Zero
+	// LastPublishedRevision means never published.
+	LastPublishedRevision protocol.Revision
+	LastPublishedAt       time.Time
+}
+
+// InventoryPublishResult is what a "Publish Inventory" click returns.
+// Defined here, not in cmd/bridge, for the same reason SwarmStatus is: a
+// Backend method's return type must be visible to this package, and this
+// package cannot import package main.
+type InventoryPublishResult struct {
+	// Published is false when the policy permitted nothing to publish —
+	// most likely because no reference catalogue is loaded for any
+	// platform RomM actually has. Not an error: an owner who hasn't loaded
+	// a DAT yet should see why, not a failure.
+	Published bool
+
+	ItemCount     int
+	SkippedCount  int
+	DistinctFiles int // Swarm-wide, from the Host's response
+	Revision      protocol.Revision
+
+	// SkipReasons counts why holdings weren't published, one entry per
+	// distinct reason — populated only when Published is false.
+	SkipReasons map[string]int
 }
