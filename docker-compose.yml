@@ -79,7 +79,10 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      - .:/src
+      # :Z relabels the bind mount for this container's exclusive use under
+      # SELinux (enforcing by default on Fedora) — without it, the source
+      # tree is mounted but unreadable inside the container.
+      - .:/src:Z
       - go-mod-cache:/go/pkg/mod
       - go-build-cache:/root/.cache/go-build
     environment:
