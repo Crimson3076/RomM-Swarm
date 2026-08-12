@@ -139,11 +139,11 @@ jobs:
             fi
             sleep 1
           done
-          docker run -d --name host-smoke --network host-smoke-net -p 8081:8081 \
+          docker run -d --name host-smoke --network host-smoke-net -p 8081:8081 -p 8082:8082 \
             -e HOST_DATABASE_URL="postgres://host:host@host-smoke-postgres:5432/host?sslmode=disable" \
             romm-swarm-host:ci
           for i in $(seq 1 20); do
-            if curl -fsS http://127.0.0.1:8081/healthz > /dev/null; then
+            if curl -fsS http://127.0.0.1:8081/healthz > /dev/null && curl -fsS http://127.0.0.1:8082/healthz > /dev/null; then
               echo "healthz ok"
               break
             fi
@@ -154,7 +154,7 @@ jobs:
             fi
             sleep 1
           done
-          docker exec host-smoke /host -healthcheck -addr :8081
+          docker exec host-smoke /host -healthcheck -addr :8081 -ui-addr :8082
 
       - name: Stop host containers
         if: always()

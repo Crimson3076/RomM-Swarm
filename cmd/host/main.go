@@ -20,15 +20,17 @@ import (
 	"github.com/Crimson3076/RomM-Swarm/host/directory"
 	"github.com/Crimson3076/RomM-Swarm/host/hostapi"
 	"github.com/Crimson3076/RomM-Swarm/host/hoststore"
+	"github.com/Crimson3076/RomM-Swarm/host/hostui"
 )
 
 func main() {
-	healthcheck := flag.Bool("healthcheck", false, "check GET /healthz on -addr and exit 0/1 (used by Docker HEALTHCHECK; no shell in the image)")
-	addr := flag.String("addr", envOr("HOST_LISTEN_ADDR", ":8081"), "address to serve the Host API on")
+	healthcheck := flag.Bool("healthcheck", false, "check GET /healthz on -addr and -ui-addr and exit 0/1 (used by Docker HEALTHCHECK; no shell in the image)")
+	addr := flag.String("addr", envOr("HOST_LISTEN_ADDR", ":8081"), "address to serve the Host JSON API on")
+	uiAddr := flag.String("ui-addr", envOr("HOST_UI_LISTEN_ADDR", ":8082"), "address to serve the Host web UI on")
 	flag.Parse()
 
 	if *healthcheck {
-		os.Exit(runHealthcheck(*addr))
+		os.Exit(runHealthcheck(*addr, *uiAddr))
 	}
 
 	dsn := strings.TrimSpace(os.Getenv("HOST_DATABASE_URL"))
@@ -50,27 +52,45 @@ func main() {
 	}
 	fmt.Println("host: schema applied")
 
-	server := hostapi.New(directory.New(db))
-	httpServer := &http.Server{Addr: *addr, Handler: server}
+	dir := directory.New(db)
+	apiServer := &http.Server{Addr: *addr, Handler: hostapi.New(dir)}
+	uiServer := &http.Server{Addr: *uiAddr, Handler: hostui.New(dir)}
 
-	serveErr := make(chan error, 1)
+	// Two independent servers over one Directory: hostapi.Server is
+	// deliberately JSON-only (see its own package doc comment), and
+	// hostui.Server is its own browser-facing front end on a separate
+	// port — the same relationship bridge/adminui has to cmd/bridge's
+	// daemon core.
+	serveErr := make(chan error, 2)
 	go func() {
 		fmt.Printf("host: serving the API on %s\n", *addr)
-		serveErr <- httpServer.ListenAndServe()
+		serveErr <- apiServer.ListenAndServe()
 	}()
+	go func() {
+		fmt.Printf("host: serving the web UI on %s\n", *uiAddr)
+		serveErr <- uiServer.ListenAndServe()
+	}()
+
+	shutdown := func() {
+		fmt.Println("host: shutting down")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := apiServer.Shutdown(shutdownCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "host: error shutting down the API server: %v\n", err)
+		}
+		if err := uiServer.Shutdown(shutdownCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "host: error shutting down the web UI server: %v\n", err)
+		}
+	}
 
 	select {
 	case err := <-serveErr:
+		shutdown()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			fatal(err)
 		}
 	case <-ctx.Done():
-		fmt.Println("host: shutting down")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := httpServer.Shutdown(shutdownCtx); err != nil {
-			fmt.Fprintf(os.Stderr, "host: error during shutdown: %v\n", err)
-		}
+		shutdown()
 	}
 }
 

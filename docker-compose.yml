@@ -43,8 +43,10 @@ services:
         condition: service_healthy
     ports:
       - "8081:8081"
+      - "8082:8082"
     environment:
       HOST_LISTEN_ADDR: :8081
+      HOST_UI_LISTEN_ADDR: :8082
       HOST_DATABASE_URL: postgres://host:${HOST_POSTGRES_PASSWORD:-host}@postgres:5432/host?sslmode=disable
 
   postgres:
