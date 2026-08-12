@@ -221,6 +221,43 @@ management as part of this record.
 - Transfer/preservation requests and any other item Scope of Work §5.1
   names beyond "central inventory index and change feed" basics.
 
+## Manual verification
+
+Real three-process run: one `cmd/host` against a real, freshly created
+Postgres database, two independent `cmd/bridge` daemons each against their
+own small standalone fake RomM HTTP server (real, structurally valid
+Game Boy cartridge images from `internal/romfixture`, not `internal/fakeromm`'s
+fixed non-analyzable payload — this needed content a real scan could
+actually canonicalize and classify), all driven over real HTTP with no
+shortcuts through Go's test harness.
+
+Setup: a Swarm with two invitations, one per Bridge. Each Bridge bootstrapped
+entirely from env vars (`ROMM_URL`/`ROMM_TOKEN`, `SWARM_HOST_URL`/
+`SWARM_INVITATION_CODE`, `SWARM_REFERENCE_DAT_GB` pointing at one shared
+fixture DAT — realistic, since two Bridges pulling from the same public
+No-Intro catalogue is the common case) and then had its admin password set
+via `/setup`, exactly as an operator would. Bridge A's fake RomM held
+`Shared Game (USA)` and `Bridge A Only (USA)`; Bridge B's held the same
+`Shared Game (USA)` payload (byte-identical, to prove cross-Bridge
+deduplication rather than assume it) plus `Bridge B Only (USA)`.
+
+Publishing each Bridge's inventory through the real
+`POST /api/swarm/publish-inventory` route (the same one the admin UI's
+button calls) produced:
+
+- Bridge A alone: `{"published":true,"item_count":2,"distinct_files":2,...}`
+- Bridge B, after A: `{"published":true,"item_count":2,"distinct_files":3,...}`
+
+`distinct_files` climbing from 2 to 3 (not 4) on Bridge B's publish is the
+dedupe proof: the shared file counted once, swarm-wide, not twice. The real
+Host UI's Swarm page (`GET /swarms/{id}`, the same route a browser renders)
+confirmed the same arithmetic independently: "3 distinct file(s) across 4
+published holding(s), 1 held by more than one Bridge," with both Bridges'
+rows showing 2 items and a real `LastPublishedAt` timestamp instead of
+"never." This is the one property no single-Bridge unit test can
+demonstrate — two independently-scanning Bridges converging on one
+correct swarm-wide count required a second real Bridge process to prove.
+
 ## Open questions
 
 - Whether the alias-mismatch check in `Directory.PublishInventory` should
