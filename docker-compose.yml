@@ -69,9 +69,11 @@ services:
   # Go toolchain, no local Postgres install. Reuses the same postgres
   # service the host container uses; hoststoretest.OpenDB gives each test
   # its own throwaway schema within it, so sharing the database is safe.
+  # Non-Alpine image deliberately: -race needs cgo, and golang:*-alpine has
+  # no C toolchain installed, unlike the Debian-based image.
   # Usage: docker compose run --rm test
   test:
-    image: golang:1.24-alpine
+    image: golang:1.24
     working_dir: /src
     depends_on:
       postgres:
