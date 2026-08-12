@@ -1,0 +1,27 @@
+{{define "header"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}} — Host</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+{{if .Authenticated}}
+<nav class="topnav">
+  <span class="brand">Network Host</span>
+  <a href="/">Dashboard</a>
+  <form method="post" action="/logout" class="logout-form">
+    <button type="submit" class="link-button">Log out</button>
+  </form>
+</nav>
+{{end}}
+<main class="content">
+{{if .Error}}<div class="flash flash-error">{{.Error}}</div>{{end}}
+{{if .Notice}}<div class="flash flash-notice">{{.Notice}}</div>{{end}}
+{{end}}
+{{define "footer"}}
+</main>
+</body>
+</html>
+{{end}}

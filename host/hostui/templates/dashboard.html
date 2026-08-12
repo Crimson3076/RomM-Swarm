@@ -1,0 +1,19 @@
+{{define "dashboard"}}{{template "header" .}}
+<h1>Dashboard</h1>
+
+<div class="card">
+  <h2>Swarms</h2>
+  {{if .Swarms}}
+  <table class="table">
+    <thead><tr><th>Name</th><th></th></tr></thead>
+    <tbody>
+    {{range .Swarms}}
+      <tr><td>{{.Name}}</td><td><a href="/swarms/{{.ID}}">View</a></td></tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p>No Swarms yet.</p>
+  {{end}}
+</div>
+{{template "footer" .}}{{end}}

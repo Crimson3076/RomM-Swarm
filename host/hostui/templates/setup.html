@@ -1,0 +1,25 @@
+{{define "setup"}}{{template "header" .}}
+<h1>First-time setup</h1>
+<p>Create the owner account for this Network Host. There is exactly one
+owner account in this release — see the admin UI's own documentation for
+what that does and doesn't mean.</p>
+
+<form method="post" action="/setup" class="form">
+  <label for="username">Username</label>
+  <input type="text" id="username" name="username" required autofocus value="{{.Username}}">
+
+  <label for="display_name">Display name</label>
+  <input type="text" id="display_name" name="display_name" required value="{{.DisplayName}}">
+
+  <label for="email">Email (optional)</label>
+  <input type="email" id="email" name="email">
+
+  <label for="password">Password</label>
+  <input type="password" id="password" name="password" required autocomplete="new-password" minlength="8">
+
+  <label for="password_confirm">Confirm password</label>
+  <input type="password" id="password_confirm" name="password_confirm" required autocomplete="new-password" minlength="8">
+
+  <button type="submit">Create owner account</button>
+</form>
+{{template "footer" .}}{{end}}
