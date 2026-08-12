@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,12 +30,20 @@ type fakeHost struct {
 	// revoked, when true, makes rotate return 403 regardless of the token
 	// presented.
 	revoked bool
+
+	// lastPublishedManifest records the last manifest handlePublishInventory
+	// received, so tests can assert what was actually sent over the wire.
+	lastPublishedManifest protocol.Manifest
+	// notEnrolledInSwarm, when true, makes the inventory route return 403
+	// with the "not enrolled" message rather than authenticating normally.
+	notEnrolledInSwarm bool
 }
 
 func newFakeHost() *fakeHost {
 	f := &fakeHost{mux: http.NewServeMux()}
 	f.mux.HandleFunc("POST /api/bridges/enroll", f.handleEnroll)
 	f.mux.HandleFunc("POST /api/bridges/{bridgeID}/rotate", f.handleRotate)
+	f.mux.HandleFunc("POST /api/bridges/{bridgeID}/inventory", f.handlePublishInventory)
 	return f
 }
 
@@ -88,6 +97,33 @@ func (f *fakeHost) handleRotate(w http.ResponseWriter, r *http.Request) {
 		"refresh_token":     string(f.currentToken),
 		"access_expires_at": time.Now().Add(5 * time.Minute),
 		"outcome":           "rotated",
+	})
+}
+
+func (f *fakeHost) handlePublishInventory(w http.ResponseWriter, r *http.Request) {
+	bridgeID := protocol.BridgeID(r.PathValue("bridgeID"))
+	var req struct {
+		RefreshToken string            `json:"refresh_token"`
+		Manifest     protocol.Manifest `json:"manifest"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "could not read the request body")
+		return
+	}
+	if f.notEnrolledInSwarm {
+		writeError(w, http.StatusForbidden, "bridge is not actively enrolled in this swarm")
+		return
+	}
+	if bridgeID != f.enrolledBridge || auth.Token(req.RefreshToken) != f.currentToken {
+		writeError(w, http.StatusUnauthorized, "credential not recognised")
+		return
+	}
+	f.lastPublishedManifest = req.Manifest
+	writeJSON(w, http.StatusOK, map[string]any{
+		"item_count":     len(req.Manifest.Items),
+		"revision":       uint64(req.Manifest.Revision),
+		"published_at":   time.Now(),
+		"distinct_files": len(req.Manifest.Items),
 	})
 }
 
@@ -227,5 +263,105 @@ func TestRotateFuncMapsForbiddenToTheSameAuthSentinelError(t *testing.T) {
 	_, err = client.RotateFunc(store)(enrolled.BridgeID, enrolled.Refresh)
 	if err != auth.ErrFamilyRevoked {
 		t.Fatalf("rotate against a revoked family: err = %v, want auth.ErrFamilyRevoked", err)
+	}
+}
+
+func testManifest(swarm protocol.SwarmID, alias protocol.BridgeAlias) protocol.Manifest {
+	sha := "deadbeef00000000000000000000000000000000000000000000000000ab"
+	return protocol.Manifest{
+		SchemaVersion: protocol.SchemaVersion,
+		Swarm:         swarm,
+		Alias:         alias,
+		Revision:      1,
+		GeneratedAt:   time.Now().UTC(),
+		Items: []protocol.Item{{
+			FileID:         protocol.FileIDFromCanonicalDigest(sha),
+			Platform:       protocol.PlatformGB,
+			Canonical:      protocol.Digest{SHA256: sha, Size: 100},
+			Classification: protocol.ClassVerifiedEligible,
+			Reference: &protocol.ReferenceMatch{
+				Family: "test-family", SetName: "test-set", SetVersion: "1",
+				EntryName: "Test Entry", CanonicalKey: "test-entry", Strength: protocol.StrengthStrong,
+			},
+			Adapter: protocol.AdapterRef{ID: "test-adapter", Version: "1"},
+		}},
+	}
+}
+
+func TestPublishInventorySucceedsAndCarriesTheManifest(t *testing.T) {
+	fake := newFakeHost()
+	fake.validCode = "the-real-code"
+	srv := httptest.NewServer(fake)
+	defer srv.Close()
+
+	client := New(srv.URL)
+	pub := newTestKey(t)
+	enrolled, err := client.Enroll(context.Background(), "the-real-code", pub)
+	if err != nil {
+		t.Fatalf("Enroll: %v", err)
+	}
+
+	manifest := testManifest("swm_test0000000000000000000", "als_test0000000000000000000")
+	result, err := client.PublishInventory(context.Background(), enrolled.BridgeID, enrolled.Refresh, manifest)
+	if err != nil {
+		t.Fatalf("PublishInventory: %v", err)
+	}
+	if result.ItemCount != 1 || result.Revision != 1 {
+		t.Fatalf("PublishInventory result = %+v, want ItemCount 1, Revision 1", result)
+	}
+	if len(fake.lastPublishedManifest.Items) != 1 || fake.lastPublishedManifest.Items[0].FileID != manifest.Items[0].FileID {
+		t.Fatalf("fakeHost received %+v, want the manifest that was sent", fake.lastPublishedManifest)
+	}
+}
+
+func TestPublishInventoryMapsUnauthorizedToTheSameAuthSentinelError(t *testing.T) {
+	fake := newFakeHost()
+	fake.validCode = "the-real-code"
+	srv := httptest.NewServer(fake)
+	defer srv.Close()
+
+	client := New(srv.URL)
+	pub := newTestKey(t)
+	enrolled, err := client.Enroll(context.Background(), "the-real-code", pub)
+	if err != nil {
+		t.Fatalf("Enroll: %v", err)
+	}
+
+	manifest := testManifest("swm_test0000000000000000000", "als_test0000000000000000000")
+	_, err = client.PublishInventory(context.Background(), enrolled.BridgeID, "the-wrong-token", manifest)
+	if err != auth.ErrUnknownToken {
+		t.Fatalf("PublishInventory with a wrong token: err = %v, want auth.ErrUnknownToken", err)
+	}
+}
+
+// TestPublishInventoryPreservesTheServerMessageOnForbidden confirms a 403
+// does NOT collapse to a single sentinel error the way RotateFunc's does —
+// this route has two distinct 403 causes (a revoked credential family, or
+// a Bridge no longer enrolled in the named Swarm), so the caller sees the
+// server's actual message instead of a possibly-misleading sentinel.
+func TestPublishInventoryPreservesTheServerMessageOnForbidden(t *testing.T) {
+	fake := newFakeHost()
+	fake.validCode = "the-real-code"
+	srv := httptest.NewServer(fake)
+	defer srv.Close()
+
+	client := New(srv.URL)
+	pub := newTestKey(t)
+	enrolled, err := client.Enroll(context.Background(), "the-real-code", pub)
+	if err != nil {
+		t.Fatalf("Enroll: %v", err)
+	}
+	fake.notEnrolledInSwarm = true
+
+	manifest := testManifest("swm_test0000000000000000000", "als_test0000000000000000000")
+	_, err = client.PublishInventory(context.Background(), enrolled.BridgeID, enrolled.Refresh, manifest)
+	if err == nil {
+		t.Fatal("PublishInventory against a Bridge not enrolled in the Swarm succeeded")
+	}
+	if err == auth.ErrFamilyRevoked {
+		t.Fatal("PublishInventory collapsed a not-enrolled 403 into ErrFamilyRevoked, hiding the real cause")
+	}
+	if !strings.Contains(err.Error(), "not actively enrolled") {
+		t.Fatalf("PublishInventory error = %q, want it to preserve the server's message", err.Error())
 	}
 }

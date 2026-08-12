@@ -200,6 +200,86 @@ func (c *Client) RotateFunc(store *auth.FileStore) func(protocol.BridgeID, auth.
 	}
 }
 
+// publishInventoryTimeout replaces DefaultTimeout for PublishInventory: a
+// full-catalogue manifest's body can be far larger than enroll/rotate's
+// small, fixed-shape requests, so 30 seconds is too tight a default here.
+const publishInventoryTimeout = 5 * time.Minute
+
+// PublishInventoryResult is what a successful inventory publish returns.
+type PublishInventoryResult struct {
+	ItemCount     int
+	Revision      protocol.Revision
+	PublishedAt   time.Time
+	DistinctFiles int
+}
+
+type publishInventoryRequest struct {
+	RefreshToken string            `json:"refresh_token"`
+	Manifest     protocol.Manifest `json:"manifest"`
+}
+
+type publishInventoryResponse struct {
+	ItemCount     int       `json:"item_count"`
+	Revision      uint64    `json:"revision"`
+	PublishedAt   time.Time `json:"published_at"`
+	DistinctFiles int       `json:"distinct_files"`
+}
+
+// PublishInventory sends manifest to the Host, presenting refresh as the
+// Bridge's proof of identity. Matches host/hostapi.handlePublishInventory's
+// exact contract: POST /api/bridges/{id}/inventory,
+// {refresh_token, manifest} in, {item_count, revision, published_at,
+// distinct_files} out.
+//
+// Only a 401 maps to a sentinel error (auth.ErrUnknownToken) — unlike
+// RotateFunc, a 403 here has two distinct causes (a revoked credential
+// family, or a Bridge no longer actively enrolled in the named Swarm) that
+// this client cannot safely collapse into one sentinel without misleading
+// the caller about which happened; the server's own message is preserved
+// via responseErrorMessage instead.
+func (c *Client) PublishInventory(ctx context.Context, bridge protocol.BridgeID, refresh auth.Token, manifest protocol.Manifest) (PublishInventoryResult, error) {
+	body, err := json.Marshal(publishInventoryRequest{RefreshToken: string(refresh), Manifest: manifest})
+	if err != nil {
+		return PublishInventoryResult{}, fmt.Errorf("hostclient: encoding inventory publish request: %w", err)
+	}
+
+	timeout := c.Timeout
+	if timeout <= 0 {
+		timeout = publishInventoryTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/bridges/"+string(bridge)+"/inventory", bytes.NewReader(body))
+	if err != nil {
+		return PublishInventoryResult{}, fmt.Errorf("hostclient: building inventory publish request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return PublishInventoryResult{}, fmt.Errorf("hostclient: calling inventory publish: %w", err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var out publishInventoryResponse
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			return PublishInventoryResult{}, fmt.Errorf("hostclient: decoding inventory publish response: %w", err)
+		}
+		return PublishInventoryResult{
+			ItemCount:     out.ItemCount,
+			Revision:      protocol.Revision(out.Revision),
+			PublishedAt:   out.PublishedAt,
+			DistinctFiles: out.DistinctFiles,
+		}, nil
+	case http.StatusUnauthorized:
+		return PublishInventoryResult{}, auth.ErrUnknownToken
+	default:
+		return PublishInventoryResult{}, fmt.Errorf("hostclient: inventory publish failed: %s", responseErrorMessage(resp))
+	}
+}
+
 type errorBody struct {
 	Error string `json:"error"`
 }
