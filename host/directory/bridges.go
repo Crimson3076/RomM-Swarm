@@ -26,36 +26,49 @@ var ErrInvitationInvalid = errors.New("directory: invitation is invalid, expired
 // different keys are not covered by the per-BridgeID lock below (different
 // keys mean different BridgeIDs) — closed instead by the invitation
 // UPDATE's own row-level locking, a single atomic statement.
-func (d *Directory) RedeemInvitation(ctx context.Context, code InvitationCode, publicKey []byte) (protocol.BridgeID, auth.Token, error) {
+//
+// Returns the Swarm and the Bridge's Swarm-scoped alias alongside the
+// BridgeID and credential — a Bridge cannot compute its own alias, since
+// the Swarm's alias key never leaves the Host (see protocol/alias.go), so
+// enrollment is the only point this can be handed over. See ADR 0019.
+func (d *Directory) RedeemInvitation(ctx context.Context, code InvitationCode, publicKey []byte) (protocol.BridgeID, protocol.SwarmID, protocol.BridgeAlias, auth.Token, error) {
 	now := d.now()
 
 	var (
 		invitationID protocol.InvitationID
 		swarmID      protocol.SwarmID
+		aliasKey     []byte
 	)
 	err := d.DB.QueryRowContext(ctx, `
 		UPDATE invitations
 		SET use_count = use_count + 1
-		WHERE code_hash = $1
-		  AND revoked_at IS NULL
-		  AND expires_at > $2
-		  AND use_count < max_uses
-		RETURNING id, swarm_id`,
+		FROM swarms
+		WHERE invitations.code_hash = $1
+		  AND invitations.revoked_at IS NULL
+		  AND invitations.expires_at > $2
+		  AND invitations.use_count < invitations.max_uses
+		  AND swarms.id = invitations.swarm_id
+		RETURNING invitations.id, invitations.swarm_id, swarms.alias_key`,
 		code.hash(), now,
-	).Scan(&invitationID, &swarmID)
+	).Scan(&invitationID, &swarmID, &aliasKey)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", "", ErrInvitationInvalid
+		return "", "", "", "", ErrInvitationInvalid
 	}
 	if err != nil {
-		return "", "", fmt.Errorf("directory: redeeming invitation: %w", err)
+		return "", "", "", "", fmt.Errorf("directory: redeeming invitation: %w", err)
 	}
 
 	bridgeID := protocol.BridgeIDFromPublicKey(publicKey)
+	alias, err := protocol.AliasFor(aliasKey, swarmID, bridgeID)
+	if err != nil {
+		return "", "", "", "", fmt.Errorf("directory: computing Bridge alias: %w", err)
+	}
+
 	unlock := d.locks.lock(bridgeID)
 	defer unlock()
 
 	if err := hoststore.EnsureBridge(ctx, d.DB, bridgeID, publicKey); err != nil {
-		return "", "", err
+		return "", "", "", "", err
 	}
 	_, err = d.DB.ExecContext(ctx, `
 		INSERT INTO bridge_swarm_memberships (bridge_id, swarm_id, enrolled_via_invitation, joined_at)
@@ -63,18 +76,18 @@ func (d *Directory) RedeemInvitation(ctx context.Context, code InvitationCode, p
 		ON CONFLICT (bridge_id, swarm_id) DO NOTHING`,
 		string(bridgeID), string(swarmID), string(invitationID), now)
 	if err != nil {
-		return "", "", fmt.Errorf("directory: recording Swarm membership: %w", err)
+		return "", "", "", "", fmt.Errorf("directory: recording Swarm membership: %w", err)
 	}
 
 	token, err := d.verifier.Enroll(bridgeID)
 	if err != nil {
-		return "", "", fmt.Errorf("directory: enrolling Bridge credential: %w", err)
+		return "", "", "", "", fmt.Errorf("directory: enrolling Bridge credential: %w", err)
 	}
 
 	_ = d.events.Record(ctx, protocol.Event{
 		Kind: protocol.EventBridgeEnrolled, At: now, SwarmID: swarmID, ActorBridge: bridgeID,
 	})
-	return bridgeID, token, nil
+	return bridgeID, swarmID, alias, token, nil
 }
 
 // RotateBridgeCredential exchanges a Bridge's refresh credential for a new

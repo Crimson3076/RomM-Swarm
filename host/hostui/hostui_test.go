@@ -214,7 +214,7 @@ func TestPhase2_SwarmLifecycleCreateInviteRevokeReenroll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ed25519.GenerateKey: %v", err)
 	}
-	bridgeID, _, err := dir.RedeemInvitation(context.Background(), directory.InvitationCode(code), pub)
+	bridgeID, _, _, _, err := dir.RedeemInvitation(context.Background(), directory.InvitationCode(code), pub)
 	if err != nil {
 		t.Fatalf("RedeemInvitation: %v", err)
 	}

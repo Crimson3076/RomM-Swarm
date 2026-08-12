@@ -10,6 +10,8 @@ import (
 
 	"github.com/Crimson3076/RomM-Swarm/auth"
 	"github.com/Crimson3076/RomM-Swarm/host/directory"
+	"github.com/Crimson3076/RomM-Swarm/host/hoststore/hoststoretest"
+	"github.com/Crimson3076/RomM-Swarm/protocol"
 )
 
 // TestPhase2_ConcurrentRotateIsSerializedByTheMutex is the before/after
@@ -50,7 +52,7 @@ func TestPhase2_ConcurrentRotateIsSerializedByTheMutex(t *testing.T) {
 		t.Fatalf("IssueInvitation: %v", err)
 	}
 	key := randomKey(t)
-	bridgeID, initial, err := d.RedeemInvitation(ctx, code, key)
+	bridgeID, _, _, initial, err := d.RedeemInvitation(ctx, code, key)
 	if err != nil {
 		t.Fatalf("RedeemInvitation: %v", err)
 	}
@@ -128,7 +130,7 @@ func TestPhase2_ConcurrentRedemptionOfASingleUseInvitationAllowsOnlyOne(t *testi
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, _, err := d.RedeemInvitation(ctx, code, randomKey(t)); err == nil {
+			if _, _, _, _, err := d.RedeemInvitation(ctx, code, randomKey(t)); err == nil {
 				atomic.AddInt64(&succeeded, 1)
 			}
 		}()
@@ -156,7 +158,7 @@ func TestPhase2_RevokedBridgeCannotRotate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("IssueInvitation: %v", err)
 	}
-	bridgeID, token, err := d.RedeemInvitation(ctx, code, randomKey(t))
+	bridgeID, _, _, token, err := d.RedeemInvitation(ctx, code, randomKey(t))
 	if err != nil {
 		t.Fatalf("RedeemInvitation: %v", err)
 	}
@@ -185,7 +187,7 @@ func TestPhase2_ReenrolledBridgeCanRotateAgain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("IssueInvitation: %v", err)
 	}
-	bridgeID, _, err := d.RedeemInvitation(ctx, code, randomKey(t))
+	bridgeID, _, _, _, err := d.RedeemInvitation(ctx, code, randomKey(t))
 	if err != nil {
 		t.Fatalf("RedeemInvitation: %v", err)
 	}
@@ -206,7 +208,7 @@ func TestPhase2_RedeemInvitationRejectsAnInvalidCode(t *testing.T) {
 	d := newTestDirectory(t)
 	ctx := context.Background()
 
-	if _, _, err := d.RedeemInvitation(ctx, "not-a-real-code", randomKey(t)); err == nil {
+	if _, _, _, _, err := d.RedeemInvitation(ctx, "not-a-real-code", randomKey(t)); err == nil {
 		t.Fatal("RedeemInvitation accepted a code that was never issued")
 	}
 }
@@ -236,7 +238,7 @@ func TestPhase2_ListBridgesForSwarmReflectsRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("IssueInvitation: %v", err)
 	}
-	bridgeID, _, err := d.RedeemInvitation(ctx, code, randomKey(t))
+	bridgeID, _, _, _, err := d.RedeemInvitation(ctx, code, randomKey(t))
 	if err != nil {
 		t.Fatalf("RedeemInvitation: %v", err)
 	}
@@ -278,7 +280,7 @@ func TestPhase2_SetBridgeDisplayName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("IssueInvitation: %v", err)
 	}
-	bridgeID, _, err := d.RedeemInvitation(ctx, code, randomKey(t))
+	bridgeID, _, _, _, err := d.RedeemInvitation(ctx, code, randomKey(t))
 	if err != nil {
 		t.Fatalf("RedeemInvitation: %v", err)
 	}
@@ -322,5 +324,51 @@ func TestPhase2_SetBridgeDisplayName(t *testing.T) {
 	}
 	if err := d.SetBridgeDisplayName(ctx, otherSwarmID, bridgeID, "Should Not Apply"); !errors.Is(err, directory.ErrBridgeNotInSwarm) {
 		t.Fatalf("SetBridgeDisplayName for a Bridge not in the Swarm: err = %v, want ErrBridgeNotInSwarm", err)
+	}
+}
+
+// TestPhase2_RedeemInvitationReturnsTheCorrectSwarmAndAlias is ADR 0019's
+// enrollment-fix proof: a Bridge cannot compute its own alias (the Swarm's
+// alias key never leaves the Host, protocol/alias.go), so RedeemInvitation
+// must hand back the correct one directly. The only way a test can verify
+// "correct" rather than merely "present" is to read the alias key straight
+// out of Postgres and recompute protocol.AliasFor independently.
+func TestPhase2_RedeemInvitationReturnsTheCorrectSwarmAndAlias(t *testing.T) {
+	dsn := hoststoretest.SkipWithoutPostgres(t)
+	db := hoststoretest.OpenDB(t, dsn)
+	d := directory.New(db)
+	ctx := context.Background()
+
+	owner, err := d.BootstrapOwner(ctx, "owner", "The Owner", "", "the-password")
+	if err != nil {
+		t.Fatalf("BootstrapOwner: %v", err)
+	}
+	swarmID, err := d.CreateSwarm(ctx, owner, "Test Swarm")
+	if err != nil {
+		t.Fatalf("CreateSwarm: %v", err)
+	}
+	code, _, err := d.IssueInvitation(ctx, swarmID, owner, 1, 0)
+	if err != nil {
+		t.Fatalf("IssueInvitation: %v", err)
+	}
+
+	bridgeID, gotSwarmID, gotAlias, _, err := d.RedeemInvitation(ctx, code, randomKey(t))
+	if err != nil {
+		t.Fatalf("RedeemInvitation: %v", err)
+	}
+	if gotSwarmID != swarmID {
+		t.Fatalf("RedeemInvitation returned SwarmID %s, want %s", gotSwarmID, swarmID)
+	}
+
+	var aliasKey []byte
+	if err := db.QueryRowContext(ctx, `SELECT alias_key FROM swarms WHERE id = $1`, string(swarmID)).Scan(&aliasKey); err != nil {
+		t.Fatalf("reading the Swarm's alias key directly: %v", err)
+	}
+	want, err := protocol.AliasFor(aliasKey, swarmID, bridgeID)
+	if err != nil {
+		t.Fatalf("protocol.AliasFor: %v", err)
+	}
+	if gotAlias != want {
+		t.Fatalf("RedeemInvitation returned alias %s, want %s (independently recomputed)", gotAlias, want)
 	}
 }

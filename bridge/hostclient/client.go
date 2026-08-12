@@ -58,9 +58,14 @@ func (c *Client) timeout() time.Duration {
 	return DefaultTimeout
 }
 
-// EnrollResult is what a successful enrollment returns.
+// EnrollResult is what a successful enrollment returns. SwarmID and Alias
+// are needed to publish inventory later (ADR 0019) — a Bridge cannot
+// compute its own alias, since the Swarm's alias key never leaves the
+// Host, so enrollment is the only point it can be handed over.
 type EnrollResult struct {
 	BridgeID protocol.BridgeID
+	SwarmID  protocol.SwarmID
+	Alias    protocol.BridgeAlias
 	Refresh  auth.Token
 }
 
@@ -71,13 +76,15 @@ type enrollRequest struct {
 
 type enrollResponse struct {
 	BridgeID     string `json:"bridge_id"`
+	SwarmID      string `json:"swarm_id"`
+	BridgeAlias  string `json:"bridge_alias"`
 	RefreshToken string `json:"refresh_token"`
 }
 
 // Enroll redeems code against the Host, presenting publicKey as this
 // Bridge's identity. Matches host/hostapi.handleEnrollBridge's exact
 // contract: POST /api/bridges/enroll, {code, public_key (base64)} in,
-// {bridge_id, refresh_token} out.
+// {bridge_id, swarm_id, bridge_alias, refresh_token} out.
 func (c *Client) Enroll(ctx context.Context, code string, publicKey ed25519.PublicKey) (EnrollResult, error) {
 	body, err := json.Marshal(enrollRequest{
 		Code:      code,
@@ -107,7 +114,12 @@ func (c *Client) Enroll(ctx context.Context, code string, publicKey ed25519.Publ
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 			return EnrollResult{}, fmt.Errorf("hostclient: decoding enroll response: %w", err)
 		}
-		return EnrollResult{BridgeID: protocol.BridgeID(out.BridgeID), Refresh: auth.Token(out.RefreshToken)}, nil
+		return EnrollResult{
+			BridgeID: protocol.BridgeID(out.BridgeID),
+			SwarmID:  protocol.SwarmID(out.SwarmID),
+			Alias:    protocol.BridgeAlias(out.BridgeAlias),
+			Refresh:  auth.Token(out.RefreshToken),
+		}, nil
 	case http.StatusUnprocessableEntity:
 		return EnrollResult{}, ErrInvitationInvalid
 	default:

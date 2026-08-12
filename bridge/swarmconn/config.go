@@ -38,6 +38,18 @@ type Config struct {
 	// second Bridge identity rather than being recognised as the same one.
 	IdentityPrivateKey []byte `json:"identity_private_key,omitempty"`
 
+	// SwarmID and Alias are handed over by the Host at enrollment (ADR
+	// 0019) — a Bridge cannot compute its own alias, since the Swarm's
+	// alias key never leaves the Host. Required to publish inventory.
+	SwarmID protocol.SwarmID     `json:"swarm_id,omitempty"`
+	Alias   protocol.BridgeAlias `json:"alias,omitempty"`
+
+	// LastPublishedRevision and LastPublishedAt track this Bridge's most
+	// recent successful inventory publish (ADR 0019). Zero means never
+	// published.
+	LastPublishedRevision protocol.Revision `json:"last_published_revision,omitempty"`
+	LastPublishedAt       time.Time         `json:"last_published_at,omitempty"`
+
 	PersistedAt time.Time `json:"persisted_at"`
 }
 
@@ -82,6 +94,9 @@ func (c Config) Validate() error {
 	}
 	if c.HostURL != "" && !c.HasIdentity() {
 		return errors.New("swarmconn: a Host URL is stored without an identity key")
+	}
+	if c.HostURL != "" && (c.SwarmID == "" || c.Alias == "") {
+		return errors.New("swarmconn: a Host URL is stored without a Swarm ID and alias")
 	}
 	return nil
 }

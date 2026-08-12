@@ -46,7 +46,7 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	store := newStore(t)
 	priv := newTestKey(t)
 
-	c := Config{HostURL: "https://host.example", IdentityPrivateKey: priv}
+	c := Config{HostURL: "https://host.example", IdentityPrivateKey: priv, SwarmID: "swm_test", Alias: "als_test"}
 	if err := store.Save(c); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -144,13 +144,13 @@ func TestPhase0_SaveSurvivesACrashAtEveryStep(t *testing.T) {
 			beforeKey := newTestKey(t)
 			afterKey := newTestKey(t)
 
-			original := Config{HostURL: "https://before.example", IdentityPrivateKey: beforeKey}
+			original := Config{HostURL: "https://before.example", IdentityPrivateKey: beforeKey, SwarmID: "swm_test", Alias: "als_test"}
 			if err := store.Save(original); err != nil {
 				t.Fatalf("seeding the original config: %v", err)
 			}
 
 			store.crashAfter = step
-			err := store.Save(Config{HostURL: "https://after.example", IdentityPrivateKey: afterKey})
+			err := store.Save(Config{HostURL: "https://after.example", IdentityPrivateKey: afterKey, SwarmID: "swm_test", Alias: "als_test"})
 			if !errors.Is(err, errSimulatedCrash) {
 				t.Fatalf("expected a simulated crash, got %v", err)
 			}
@@ -184,7 +184,7 @@ func TestPhase0_SaveSurvivesACrashAtEveryStep(t *testing.T) {
 
 func TestConfigFileIsNotWorldReadable(t *testing.T) {
 	store := newStore(t)
-	if err := store.Save(Config{HostURL: "https://host.example", IdentityPrivateKey: newTestKey(t)}); err != nil {
+	if err := store.Save(Config{HostURL: "https://host.example", IdentityPrivateKey: newTestKey(t), SwarmID: "swm_test", Alias: "als_test"}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	info, err := os.Stat(store.Path)

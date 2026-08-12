@@ -87,6 +87,8 @@ func (d *Daemon) JoinSwarm(ctx context.Context, hostURL, code string) (protocol.
 	}
 
 	swarmCfg.HostURL = hostURL
+	swarmCfg.SwarmID = enrolled.SwarmID
+	swarmCfg.Alias = enrolled.Alias
 	if err := d.swarmStore.Save(swarmCfg); err != nil {
 		return "", fmt.Errorf("bridge: persisting the Host connection: %w", err)
 	}

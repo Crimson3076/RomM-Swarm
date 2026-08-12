@@ -27,7 +27,7 @@ func (s *Server) handleEnrollBridge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bridgeID, token, err := s.Directory.RedeemInvitation(r.Context(), directory.InvitationCode(req.Code), key)
+	bridgeID, swarmID, alias, token, err := s.Directory.RedeemInvitation(r.Context(), directory.InvitationCode(req.Code), key)
 	if errors.Is(err, directory.ErrInvitationInvalid) {
 		writeJSONError(w, http.StatusUnprocessableEntity, "invitation is invalid, expired, or already used")
 		return
@@ -38,6 +38,8 @@ func (s *Server) handleEnrollBridge(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{
 		"bridge_id":     string(bridgeID),
+		"swarm_id":      string(swarmID),
+		"bridge_alias":  string(alias),
 		"refresh_token": string(token),
 	})
 }
