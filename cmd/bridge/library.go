@@ -4,10 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/Crimson3076/RomM-Swarm/bridge/scan"
 )
+
+// libraryWarmTimeout bounds the background warm-up fetch main.go kicks off
+// right after connecting to RomM at startup — generous, since a full
+// listing of a large library legitimately takes a while, but bounded so a
+// hung RomM connection can never leak a goroutine forever.
+const libraryWarmTimeout = 5 * time.Minute
 
 // libraryCacheTTL bounds how long a cached RomM listing is served before a
 // plain (non-forced) Library call re-fetches it. Long enough that browsing
@@ -71,6 +78,28 @@ func (d *Daemon) Library(ctx context.Context, forceRefresh bool) ([]scan.ROMReco
 	d.libraryCache = all
 	d.libraryCachedAt = time.Now()
 	return all, nil
+}
+
+// WarmLibraryCache fetches and caches RomM's full listing in the
+// background, without blocking its caller. Called once from main.go right
+// after a successful startup connection to RomM, so the first operator to
+// open the Library page after a container restart finds a warm (or
+// warming) cache instead of the daemon starting that fetch from a click —
+// the in-memory cache (see Library's own doc comment) is always empty
+// immediately after a restart, since it holds process memory, not
+// anything persisted to disk.
+//
+// Errors are logged, not surfaced anywhere else: a failed warm-up isn't
+// fatal to the daemon starting, and Library's own normal fetch-on-demand
+// path still runs the next time anything actually asks for the listing.
+func (d *Daemon) WarmLibraryCache() {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), libraryWarmTimeout)
+		defer cancel()
+		if _, err := d.Library(ctx, false); err != nil {
+			log.Printf("bridge: warming the Library cache: %v", err)
+		}
+	}()
 }
 
 // invalidateLibraryCache drops the cached listing — called on Reconnect,

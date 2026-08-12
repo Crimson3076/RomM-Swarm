@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Crimson3076/RomM-Swarm/bridge/bridgeconfig"
 )
@@ -160,6 +161,62 @@ func TestPhase2_ReconnectInvalidatesTheLibraryCache(t *testing.T) {
 	}
 	if len(items) != 2 {
 		t.Fatalf("Library after switching RomM connections returned %d record(s), want 2 (server B's, not A's stale cache)", len(items))
+	}
+}
+
+// TestPhase2_WarmLibraryCacheFillsItInTheBackground proves the fix for the
+// operator-reported "Library is slow again after a container restart"
+// report: WarmLibraryCache (called once at startup, right after Reconnect)
+// fills the cache without its caller having to block on it, so by the time
+// something actually calls Library, RomM has already been hit at most
+// once.
+func TestPhase2_WarmLibraryCacheFillsItInTheBackground(t *testing.T) {
+	fb := newFakeBridgeServer()
+	fb.roms = []map[string]any{
+		{"id": 1, "platform_slug": "gb", "fs_name": "A.gb", "fs_size_bytes": 100, "sha1_hash": "aa"},
+	}
+	srv := fb.start(t)
+
+	d, err := NewDaemon(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewDaemon: %v", err)
+	}
+	if err := d.ConfigStore().Save(bridgeconfig.Config{RommURL: srv.URL, RommToken: "t"}); err != nil {
+		t.Fatalf("saving the RomM config: %v", err)
+	}
+	if err := d.Reconnect(context.Background()); err != nil {
+		t.Fatalf("Reconnect: %v", err)
+	}
+	fb.mu.Lock()
+	baseline := fb.romsListRequests
+	fb.mu.Unlock()
+
+	d.WarmLibraryCache()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		d.libraryMu.Lock()
+		filled := d.libraryCache != nil
+		d.libraryMu.Unlock()
+		if filled {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	items, err := d.Library(context.Background(), false)
+	if err != nil {
+		t.Fatalf("Library after warming: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("Library returned %d record(s), want 1", len(items))
+	}
+
+	fb.mu.Lock()
+	requests := fb.romsListRequests - baseline
+	fb.mu.Unlock()
+	if requests != 1 {
+		t.Fatalf("RomM's /api/roms was hit %d time(s) across warming plus one Library call, want exactly 1 — the warm-up isn't sharing its fill with the cache", requests)
 	}
 }
 

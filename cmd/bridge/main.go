@@ -67,6 +67,10 @@ func main() {
 			fmt.Fprintf(os.Stderr, "bridge: could not connect to %s: %v (the admin UI's Settings page can retry)\n", cfg.RommURL, err)
 		} else {
 			fmt.Printf("bridge: connected to %s\n", cfg.RommURL)
+			// Fills the in-memory Library cache before anyone asks for it —
+			// see WarmLibraryCache's own doc comment for why this matters
+			// specifically right after a restart.
+			d.WarmLibraryCache()
 		}
 		cancelConnect()
 	} else {
