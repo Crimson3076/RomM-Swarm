@@ -51,6 +51,16 @@ type Config struct {
 	// own default.
 	ListenAddr string `json:"listen_addr,omitempty"`
 
+	// DisplayName is this Bridge's own self-declared name, sent with every
+	// inventory publish (ADR 0022) so a Host owner managing several
+	// Bridges sees something more legible than a BridgeID without having
+	// to name each one by hand. Empty means the Bridge doesn't publish a
+	// name at all — the Host-side label, if any, is left exactly as it
+	// was. Purely a suggestion: the Host owner's own rename (if they've
+	// made one) always takes precedence — see
+	// directory.Directory.PublishInventory's own doc comment.
+	DisplayName string `json:"display_name,omitempty"`
+
 	PersistedAt time.Time `json:"persisted_at"`
 }
 

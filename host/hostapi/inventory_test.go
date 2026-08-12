@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Crimson3076/RomM-Swarm/host/directory"
 	"github.com/Crimson3076/RomM-Swarm/host/hostapi"
+	"github.com/Crimson3076/RomM-Swarm/host/hoststore/hoststoretest"
 	"github.com/Crimson3076/RomM-Swarm/protocol"
 )
 
@@ -100,6 +102,46 @@ func TestPhase2_PublishInventoryHappyPathOverHTTP(t *testing.T) {
 	}
 	if body["revision"] != float64(1) {
 		t.Errorf("revision = %v, want 1", body["revision"])
+	}
+}
+
+// TestPhase2_PublishInventoryOverHTTPAppliesTheBridgePublishedName is the
+// wire-level proof for ADR 0022's display_name field: it actually reaches
+// Directory.PublishInventory and gets persisted, not just accepted and
+// silently dropped by a JSON tag mismatch.
+func TestPhase2_PublishInventoryOverHTTPAppliesTheBridgePublishedName(t *testing.T) {
+	dsn := hoststoretest.SkipWithoutPostgres(t)
+	db := hoststoretest.OpenDB(t, dsn)
+	dir := directory.New(db)
+	s := hostapi.New(dir)
+
+	swarmID, bridgeID, alias, refreshToken := enrollTestBridge(t, s)
+
+	manifest := protocol.Manifest{
+		SchemaVersion: protocol.SchemaVersion,
+		Swarm:         protocol.SwarmID(swarmID),
+		Alias:         protocol.BridgeAlias(alias),
+		Revision:      1,
+		GeneratedAt:   time.Now().UTC(),
+		Items:         []protocol.Item{validInventoryItem("item-a", protocol.PlatformGB, 100)},
+	}
+
+	resp := doJSON(t, s, http.MethodPost, "/api/bridges/"+bridgeID+"/inventory", "", map[string]any{
+		"refresh_token": refreshToken,
+		"manifest":      manifest,
+		"display_name":  "Bridge's Own Name",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("POST /api/bridges/{id}/inventory: status %d, body %s", resp.Code, resp.Body.String())
+	}
+
+	var name string
+	if err := db.QueryRow(`SELECT display_name FROM bridge_swarm_memberships WHERE bridge_id = $1 AND swarm_id = $2`,
+		bridgeID, swarmID).Scan(&name); err != nil {
+		t.Fatalf("reading the persisted display name: %v", err)
+	}
+	if name != "Bridge's Own Name" {
+		t.Fatalf("persisted display_name = %q, want %q", name, "Bridge's Own Name")
 	}
 }
 

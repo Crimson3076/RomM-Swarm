@@ -30,13 +30,20 @@ var ErrInventoryAliasMismatch = errors.New("directory: manifest alias does not m
 // 0019, resolved sub-decision 1 — then validates and stores manifest as
 // this Bridge's current inventory for the Swarm it names.
 //
+// bridgeName is the Bridge's own self-declared display name (ADR 0022),
+// applied to bridge_swarm_memberships.display_name only while the Host
+// owner hasn't set one themselves (display_name_set_by_host is false —
+// see SetBridgeDisplayName) and bridgeName is non-empty. Pass "" for a
+// Bridge that hasn't configured one; that's never an error, and never
+// clears a name the Host or a previous publish already set.
+//
 // Deliberately does not use the per-BridgeID mutex bridgeLocks provides:
 // that lock exists to serialize auth.Store's Load-then-Save race on
 // bridge_credential_families (ADR 0016, resolved sub-decision 1).
 // Authenticate never calls Save, and InventoryStore.Replace gets its own
 // atomicity from a single transaction — there is no cross-call
 // read-modify-write hazard here for a mutex to close.
-func (d *Directory) PublishInventory(ctx context.Context, bridge protocol.BridgeID, presented auth.Token, m protocol.Manifest) (hoststore.InventorySnapshot, error) {
+func (d *Directory) PublishInventory(ctx context.Context, bridge protocol.BridgeID, presented auth.Token, m protocol.Manifest, bridgeName string) (hoststore.InventorySnapshot, error) {
 	if err := d.verifier.Authenticate(bridge, presented); err != nil {
 		_ = d.events.Record(ctx, protocol.Event{Kind: protocol.EventAuthFailure, At: d.now(), ActorBridge: bridge})
 		return hoststore.InventorySnapshot{}, err
@@ -82,6 +89,16 @@ func (d *Directory) PublishInventory(ctx context.Context, bridge protocol.Bridge
 	_ = d.events.Record(ctx, protocol.Event{
 		Kind: protocol.EventInventorySnapshot, At: now, SwarmID: m.Swarm, ActorBridge: bridge,
 	})
+
+	if bridgeName != "" {
+		if _, err := d.DB.ExecContext(ctx, `
+			UPDATE bridge_swarm_memberships
+			SET display_name = $1
+			WHERE swarm_id = $2 AND bridge_id = $3 AND display_name_set_by_host = FALSE`,
+			bridgeName, string(m.Swarm), string(bridge)); err != nil {
+			return hoststore.InventorySnapshot{}, fmt.Errorf("directory: applying the bridge-published display name: %w", err)
+		}
+	}
 
 	snap, ok, err := d.inventory.SnapshotFor(ctx, bridge, m.Swarm)
 	if err != nil {

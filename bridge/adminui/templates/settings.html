@@ -22,6 +22,9 @@
     <label for="library_root">Library root (filesystem publication mode only)</label>
     <input type="text" id="library_root" name="library_root" value="{{.LibraryRoot}}" placeholder="/library">
 
+    <label for="display_name">Bridge display name (shown to the Host)</label>
+    <input type="text" id="display_name" name="display_name" value="{{.DisplayName}}" placeholder="e.g. Dallas's RomM Bridge">
+
     <button type="submit">Save connection settings</button>
     <button type="button" id="test-connection">Test connection</button>
     <span id="test-connection-result"></span>

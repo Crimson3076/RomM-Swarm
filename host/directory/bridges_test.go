@@ -332,7 +332,7 @@ func TestPhase2_RemoveBridgeFromSwarmDeletesMembershipAndInventoryButNotIdentity
 	ctx := context.Background()
 
 	m := validManifest(swarmID, alias, 1, validItem("item-a", protocol.PlatformGB, 100))
-	if _, err := d.PublishInventory(ctx, bridgeID, token, m); err != nil {
+	if _, err := d.PublishInventory(ctx, bridgeID, token, m, ""); err != nil {
 		t.Fatalf("PublishInventory: %v", err)
 	}
 

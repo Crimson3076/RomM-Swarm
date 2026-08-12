@@ -34,6 +34,9 @@ type fakeHost struct {
 	// lastPublishedManifest records the last manifest handlePublishInventory
 	// received, so tests can assert what was actually sent over the wire.
 	lastPublishedManifest protocol.Manifest
+	// lastPublishedDisplayName records the last display_name
+	// handlePublishInventory received (ADR 0022).
+	lastPublishedDisplayName string
 	// notEnrolledInSwarm, when true, makes the inventory route return 403
 	// with the "not enrolled" message rather than authenticating normally.
 	notEnrolledInSwarm bool
@@ -105,6 +108,7 @@ func (f *fakeHost) handlePublishInventory(w http.ResponseWriter, r *http.Request
 	var req struct {
 		RefreshToken string            `json:"refresh_token"`
 		Manifest     protocol.Manifest `json:"manifest"`
+		DisplayName  string            `json:"display_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "could not read the request body")
@@ -119,6 +123,7 @@ func (f *fakeHost) handlePublishInventory(w http.ResponseWriter, r *http.Request
 		return
 	}
 	f.lastPublishedManifest = req.Manifest
+	f.lastPublishedDisplayName = req.DisplayName
 	writeJSON(w, http.StatusOK, map[string]any{
 		"item_count":     len(req.Manifest.Items),
 		"revision":       uint64(req.Manifest.Revision),
@@ -302,7 +307,7 @@ func TestPublishInventorySucceedsAndCarriesTheManifest(t *testing.T) {
 	}
 
 	manifest := testManifest("swm_test0000000000000000000", "als_test0000000000000000000")
-	result, err := client.PublishInventory(context.Background(), enrolled.BridgeID, enrolled.Refresh, manifest)
+	result, err := client.PublishInventory(context.Background(), enrolled.BridgeID, enrolled.Refresh, manifest, "")
 	if err != nil {
 		t.Fatalf("PublishInventory: %v", err)
 	}
@@ -311,6 +316,32 @@ func TestPublishInventorySucceedsAndCarriesTheManifest(t *testing.T) {
 	}
 	if len(fake.lastPublishedManifest.Items) != 1 || fake.lastPublishedManifest.Items[0].FileID != manifest.Items[0].FileID {
 		t.Fatalf("fakeHost received %+v, want the manifest that was sent", fake.lastPublishedManifest)
+	}
+}
+
+// TestPublishInventorySendsTheDisplayName is the wire-level proof for ADR
+// 0022: a non-empty displayName argument actually reaches the request body
+// under the field name host/hostapi expects, not just accepted locally and
+// silently dropped.
+func TestPublishInventorySendsTheDisplayName(t *testing.T) {
+	fake := newFakeHost()
+	fake.validCode = "the-real-code"
+	srv := httptest.NewServer(fake)
+	defer srv.Close()
+
+	client := New(srv.URL)
+	pub := newTestKey(t)
+	enrolled, err := client.Enroll(context.Background(), "the-real-code", pub)
+	if err != nil {
+		t.Fatalf("Enroll: %v", err)
+	}
+
+	manifest := testManifest("swm_test0000000000000000000", "als_test0000000000000000000")
+	if _, err := client.PublishInventory(context.Background(), enrolled.BridgeID, enrolled.Refresh, manifest, "Dallas's RomM Bridge"); err != nil {
+		t.Fatalf("PublishInventory: %v", err)
+	}
+	if fake.lastPublishedDisplayName != "Dallas's RomM Bridge" {
+		t.Fatalf("fakeHost received display_name %q, want %q", fake.lastPublishedDisplayName, "Dallas's RomM Bridge")
 	}
 }
 
@@ -328,7 +359,7 @@ func TestPublishInventoryMapsUnauthorizedToTheSameAuthSentinelError(t *testing.T
 	}
 
 	manifest := testManifest("swm_test0000000000000000000", "als_test0000000000000000000")
-	_, err = client.PublishInventory(context.Background(), enrolled.BridgeID, "the-wrong-token", manifest)
+	_, err = client.PublishInventory(context.Background(), enrolled.BridgeID, "the-wrong-token", manifest, "")
 	if err != auth.ErrUnknownToken {
 		t.Fatalf("PublishInventory with a wrong token: err = %v, want auth.ErrUnknownToken", err)
 	}
@@ -354,7 +385,7 @@ func TestPublishInventoryPreservesTheServerMessageOnForbidden(t *testing.T) {
 	fake.notEnrolledInSwarm = true
 
 	manifest := testManifest("swm_test0000000000000000000", "als_test0000000000000000000")
-	_, err = client.PublishInventory(context.Background(), enrolled.BridgeID, enrolled.Refresh, manifest)
+	_, err = client.PublishInventory(context.Background(), enrolled.BridgeID, enrolled.Refresh, manifest, "")
 	if err == nil {
 		t.Fatal("PublishInventory against a Bridge not enrolled in the Swarm succeeded")
 	}

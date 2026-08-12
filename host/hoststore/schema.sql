@@ -70,14 +70,21 @@ CREATE TABLE IF NOT EXISTS bridge_swarm_memberships (
     PRIMARY KEY (bridge_id, swarm_id)
 );
 
--- Host-assigned, per-Swarm label so an owner managing several Bridges can
--- tell them apart by something more legible than a BridgeID. Deliberately
--- not Bridge-self-declared: a Bridge-supplied name would be
--- attacker-controlled text landing directly in the owner's own dashboard.
+-- Per-Swarm label so an owner managing several Bridges can tell them apart
+-- by something more legible than a BridgeID. A Bridge may publish its own
+-- chosen name with every inventory publish (ADR 0022) -- text a Bridge's
+-- own operator controls, landing in this Swarm owner's dashboard, so the
+-- Host owner always has the final word: display_name_set_by_host tracks
+-- whether the Host owner has manually set (or is still deferring on) the
+-- name, and a Bridge-declared name is only ever applied while that's
+-- false. Setting it non-empty through the Host UI flips the flag true and
+-- locks out further Bridge-declared updates; clearing it back to empty
+-- flips the flag false again, reopening it to the Bridge's own name.
 -- Added via ALTER rather than in the CREATE TABLE above so applying the
 -- schema against an already-running database (no migration tool yet;
 -- see the file comment) never requires dropping existing data.
 ALTER TABLE bridge_swarm_memberships ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE bridge_swarm_memberships ADD COLUMN IF NOT EXISTS display_name_set_by_host BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- Mirrors auth.FamilyState exactly. See BridgeCredentialStore.
 CREATE TABLE IF NOT EXISTS bridge_credential_families (

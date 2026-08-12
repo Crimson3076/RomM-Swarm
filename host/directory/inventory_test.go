@@ -132,7 +132,7 @@ func TestPhase2_PublishInventoryRejectsABadToken(t *testing.T) {
 	ctx := context.Background()
 
 	m := validManifest(swarmID, alias, 1, validItem("item-a", protocol.PlatformGB, 100))
-	if _, err := d.PublishInventory(ctx, bridgeID, "not-the-real-token", m); !errors.Is(err, auth.ErrUnknownToken) {
+	if _, err := d.PublishInventory(ctx, bridgeID, "not-the-real-token", m, ""); !errors.Is(err, auth.ErrUnknownToken) {
 		t.Fatalf("PublishInventory with a bad token: err = %v, want ErrUnknownToken", err)
 	}
 }
@@ -148,7 +148,7 @@ func TestPhase2_PublishInventoryRejectsABridgeNotEnrolledInTheNamedSwarm(t *test
 	}
 
 	m := validManifest(otherSwarm, alias, 1, validItem("item-a", protocol.PlatformGB, 100))
-	if _, err := d.PublishInventory(ctx, bridgeID, token, m); !errors.Is(err, directory.ErrBridgeNotEnrolledInSwarm) {
+	if _, err := d.PublishInventory(ctx, bridgeID, token, m, ""); !errors.Is(err, directory.ErrBridgeNotEnrolledInSwarm) {
 		t.Fatalf("PublishInventory for a Swarm never joined: err = %v, want ErrBridgeNotEnrolledInSwarm", err)
 	}
 }
@@ -165,7 +165,7 @@ func TestPhase2_PublishInventoryRejectsAnAliasMismatch(t *testing.T) {
 	wrongAlias := protocol.MustAliasFor(randomKey(t), swarmID, bridgeID)
 
 	m := validManifest(swarmID, wrongAlias, 1, validItem("item-a", protocol.PlatformGB, 100))
-	if _, err := d.PublishInventory(ctx, bridgeID, token, m); !errors.Is(err, directory.ErrInventoryAliasMismatch) {
+	if _, err := d.PublishInventory(ctx, bridgeID, token, m, ""); !errors.Is(err, directory.ErrInventoryAliasMismatch) {
 		t.Fatalf("PublishInventory with a wrong alias: err = %v, want ErrInventoryAliasMismatch", err)
 	}
 }
@@ -178,7 +178,7 @@ func TestPhase2_PublishInventoryHappyPath(t *testing.T) {
 		validItem("item-a", protocol.PlatformGB, 100),
 		validItem("item-b", protocol.PlatformGBA, 200),
 	)
-	snap, err := d.PublishInventory(ctx, bridgeID, token, m)
+	snap, err := d.PublishInventory(ctx, bridgeID, token, m, "")
 	if err != nil {
 		t.Fatalf("PublishInventory: %v", err)
 	}
@@ -196,6 +196,119 @@ func TestPhase2_PublishInventoryHappyPath(t *testing.T) {
 	}
 	if len(snapshots) != 1 || snapshots[0].BridgeID != bridgeID {
 		t.Fatalf("SwarmInventorySummary snapshots = %+v, want one entry for %s", snapshots, bridgeID)
+	}
+}
+
+// bridgeDisplayName is a small helper reading the row ListBridgesForSwarm
+// already exposes, scoped down to the one field these precedence tests
+// care about.
+func bridgeDisplayName(t *testing.T, d *directory.Directory, swarm protocol.SwarmID, bridge protocol.BridgeID) (name string, setByHost bool) {
+	t.Helper()
+	memberships, err := d.ListBridgesForSwarm(context.Background(), swarm)
+	if err != nil {
+		t.Fatalf("ListBridgesForSwarm: %v", err)
+	}
+	for _, m := range memberships {
+		if m.BridgeID == bridge {
+			return m.DisplayName, m.DisplayNameSetByHost
+		}
+	}
+	t.Fatalf("bridge %s not found in Swarm %s", bridge, swarm)
+	return "", false
+}
+
+// TestPhase2_PublishInventoryAppliesTheBridgePublishedNameWhenNoneIsSet
+// proves a Bridge's own self-declared name (ADR 0022) fills in the label
+// when the Host owner has never set one.
+func TestPhase2_PublishInventoryAppliesTheBridgePublishedNameWhenNoneIsSet(t *testing.T) {
+	d, _, swarmID, bridgeID, alias, token := enrolledFixture(t)
+	ctx := context.Background()
+
+	m := validManifest(swarmID, alias, 1, validItem("item-a", protocol.PlatformGB, 100))
+	if _, err := d.PublishInventory(ctx, bridgeID, token, m, "Living Room Shelf"); err != nil {
+		t.Fatalf("PublishInventory: %v", err)
+	}
+
+	name, setByHost := bridgeDisplayName(t, d, swarmID, bridgeID)
+	if name != "Living Room Shelf" || setByHost {
+		t.Fatalf("after a Bridge-published name with none set by the Host: name = %q, setByHost = %v, want %q and false",
+			name, setByHost, "Living Room Shelf")
+	}
+}
+
+// TestPhase2_PublishInventoryNeverOverwritesAHostSetName proves the
+// precedence rule an owner would actually rely on: once they've manually
+// named a Bridge, further Bridge-published names don't silently replace
+// it.
+func TestPhase2_PublishInventoryNeverOverwritesAHostSetName(t *testing.T) {
+	d, _, swarmID, bridgeID, alias, token := enrolledFixture(t)
+	ctx := context.Background()
+
+	if err := d.SetBridgeDisplayName(ctx, swarmID, bridgeID, "Owner's Chosen Name"); err != nil {
+		t.Fatalf("SetBridgeDisplayName: %v", err)
+	}
+
+	m := validManifest(swarmID, alias, 1, validItem("item-a", protocol.PlatformGB, 100))
+	if _, err := d.PublishInventory(ctx, bridgeID, token, m, "Bridge's Own Name"); err != nil {
+		t.Fatalf("PublishInventory: %v", err)
+	}
+
+	name, setByHost := bridgeDisplayName(t, d, swarmID, bridgeID)
+	if name != "Owner's Chosen Name" || !setByHost {
+		t.Fatalf("a Bridge-published name overwrote the Host-set one: name = %q, setByHost = %v, want %q and true",
+			name, setByHost, "Owner's Chosen Name")
+	}
+}
+
+// TestPhase2_ClearingAHostSetNameReopensItToTheBridgesOwnName proves the
+// other half of the precedence rule: an owner clearing their manual name
+// (setting it back to empty) reopens the label to whatever the Bridge
+// publishes next, rather than leaving it blank forever.
+func TestPhase2_ClearingAHostSetNameReopensItToTheBridgesOwnName(t *testing.T) {
+	d, _, swarmID, bridgeID, alias, token := enrolledFixture(t)
+	ctx := context.Background()
+
+	if err := d.SetBridgeDisplayName(ctx, swarmID, bridgeID, "Owner's Chosen Name"); err != nil {
+		t.Fatalf("SetBridgeDisplayName (set): %v", err)
+	}
+	if err := d.SetBridgeDisplayName(ctx, swarmID, bridgeID, ""); err != nil {
+		t.Fatalf("SetBridgeDisplayName (clear): %v", err)
+	}
+
+	m := validManifest(swarmID, alias, 1, validItem("item-a", protocol.PlatformGB, 100))
+	if _, err := d.PublishInventory(ctx, bridgeID, token, m, "Bridge's Own Name"); err != nil {
+		t.Fatalf("PublishInventory: %v", err)
+	}
+
+	name, setByHost := bridgeDisplayName(t, d, swarmID, bridgeID)
+	if name != "Bridge's Own Name" || setByHost {
+		t.Fatalf("after clearing the Host-set name and republishing: name = %q, setByHost = %v, want %q and false",
+			name, setByHost, "Bridge's Own Name")
+	}
+}
+
+// TestPhase2_PublishInventoryWithNoNameLeavesTheExistingLabelAlone proves
+// a Bridge that hasn't configured a self-declared name (the common case
+// before this record's Settings field is filled in) never blanks out
+// whatever name — Host-set or previously Bridge-published — is already
+// there.
+func TestPhase2_PublishInventoryWithNoNameLeavesTheExistingLabelAlone(t *testing.T) {
+	d, _, swarmID, bridgeID, alias, token := enrolledFixture(t)
+	ctx := context.Background()
+
+	if err := d.SetBridgeDisplayName(ctx, swarmID, bridgeID, "Owner's Chosen Name"); err != nil {
+		t.Fatalf("SetBridgeDisplayName: %v", err)
+	}
+
+	m := validManifest(swarmID, alias, 1, validItem("item-a", protocol.PlatformGB, 100))
+	if _, err := d.PublishInventory(ctx, bridgeID, token, m, ""); err != nil {
+		t.Fatalf("PublishInventory: %v", err)
+	}
+
+	name, setByHost := bridgeDisplayName(t, d, swarmID, bridgeID)
+	if name != "Owner's Chosen Name" || !setByHost {
+		t.Fatalf("a no-name publish disturbed the existing label: name = %q, setByHost = %v, want %q and true",
+			name, setByHost, "Owner's Chosen Name")
 	}
 }
 
@@ -258,7 +371,7 @@ func TestPhase2_ConcurrentPublishInventoryNeverProducesInconsistentState(t *test
 			defer wg.Done()
 			item := validItem(fmt.Sprintf("concurrent-item-%d", i), protocol.PlatformGB, int64(100+i))
 			m := validManifest(swarmID, alias, protocol.Revision(i+1), item)
-			if _, err := d.PublishInventory(ctx, bridgeID, token, m); err == nil {
+			if _, err := d.PublishInventory(ctx, bridgeID, token, m, ""); err == nil {
 				atomic.AddInt64(&succeeded, 1)
 			}
 		}(i)

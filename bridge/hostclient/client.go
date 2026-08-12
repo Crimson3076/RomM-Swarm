@@ -216,6 +216,7 @@ type PublishInventoryResult struct {
 type publishInventoryRequest struct {
 	RefreshToken string            `json:"refresh_token"`
 	Manifest     protocol.Manifest `json:"manifest"`
+	DisplayName  string            `json:"display_name,omitempty"`
 }
 
 type publishInventoryResponse struct {
@@ -228,8 +229,14 @@ type publishInventoryResponse struct {
 // PublishInventory sends manifest to the Host, presenting refresh as the
 // Bridge's proof of identity. Matches host/hostapi.handlePublishInventory's
 // exact contract: POST /api/bridges/{id}/inventory,
-// {refresh_token, manifest} in, {item_count, revision, published_at,
-// distinct_files} out.
+// {refresh_token, manifest, display_name} in, {item_count, revision,
+// published_at, distinct_files} out.
+//
+// displayName is this Bridge's own self-declared name (ADR 0022), sent with
+// every publish; empty means the Bridge doesn't publish a name at all. The
+// Host applies it only when its owner hasn't manually set one — see
+// directory.Directory.PublishInventory's own doc comment for the precedence
+// rule this client has no part in enforcing.
 //
 // Only a 401 maps to a sentinel error (auth.ErrUnknownToken) — unlike
 // RotateFunc, a 403 here has two distinct causes (a revoked credential
@@ -237,8 +244,8 @@ type publishInventoryResponse struct {
 // this client cannot safely collapse into one sentinel without misleading
 // the caller about which happened; the server's own message is preserved
 // via responseErrorMessage instead.
-func (c *Client) PublishInventory(ctx context.Context, bridge protocol.BridgeID, refresh auth.Token, manifest protocol.Manifest) (PublishInventoryResult, error) {
-	body, err := json.Marshal(publishInventoryRequest{RefreshToken: string(refresh), Manifest: manifest})
+func (c *Client) PublishInventory(ctx context.Context, bridge protocol.BridgeID, refresh auth.Token, manifest protocol.Manifest, displayName string) (PublishInventoryResult, error) {
+	body, err := json.Marshal(publishInventoryRequest{RefreshToken: string(refresh), Manifest: manifest, DisplayName: displayName})
 	if err != nil {
 		return PublishInventoryResult{}, fmt.Errorf("hostclient: encoding inventory publish request: %w", err)
 	}

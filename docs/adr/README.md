@@ -45,6 +45,7 @@ point.
 | [0019](0019-inventory-publishing.md) | Bridge inventory publishing to the Host | no | Accepted |
 | [0020](0020-automatic-inventory-publishing.md) | Automatic inventory publishing | no | Accepted |
 | [0021](0021-persistent-publish-status.md) | Persistent, pollable inventory-publish status | no | Accepted |
+| [0022](0022-bridge-self-declared-display-name.md) | Bridge self-declared display name | no | Accepted |
 
 ## Phase 0 gate coverage
 

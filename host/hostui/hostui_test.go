@@ -356,7 +356,7 @@ func TestPhase2_SwarmViewShowsInventoryTotalsAfterAPublish(t *testing.T) {
 		GeneratedAt:   time.Now().UTC(),
 		Items:         []protocol.Item{testInventoryItem("swarm-view-item", protocol.PlatformGB, 100)},
 	}
-	if _, err := dir.PublishInventory(context.Background(), bridgeID, token, manifest); err != nil {
+	if _, err := dir.PublishInventory(context.Background(), bridgeID, token, manifest, ""); err != nil {
 		t.Fatalf("PublishInventory: %v", err)
 	}
 

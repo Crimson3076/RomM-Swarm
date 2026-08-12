@@ -69,10 +69,11 @@ func buildInventoryTestDAT(entries map[string][]byte) []byte {
 // Daemon.PublishInventory builds the right request and handles the
 // response, without spinning up a real Host.
 type fakeInventoryHost struct {
-	mu            sync.Mutex
-	receivedCount int
-	lastManifest  protocol.Manifest
-	lastToken     string
+	mu              sync.Mutex
+	receivedCount   int
+	lastManifest    protocol.Manifest
+	lastToken       string
+	lastDisplayName string
 }
 
 func (h *fakeInventoryHost) start(t *testing.T) *httptest.Server {
@@ -82,6 +83,7 @@ func (h *fakeInventoryHost) start(t *testing.T) *httptest.Server {
 		var req struct {
 			RefreshToken string            `json:"refresh_token"`
 			Manifest     protocol.Manifest `json:"manifest"`
+			DisplayName  string            `json:"display_name"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -91,6 +93,7 @@ func (h *fakeInventoryHost) start(t *testing.T) *httptest.Server {
 		h.receivedCount++
 		h.lastManifest = req.Manifest
 		h.lastToken = req.RefreshToken
+		h.lastDisplayName = req.DisplayName
 		h.mu.Unlock()
 
 		writeJSON(w, map[string]any{
@@ -221,6 +224,54 @@ func TestPhase2_PublishInventoryScansClassifiesAndPublishes(t *testing.T) {
 	}
 	if saved.LastPublishedAt.IsZero() {
 		t.Error("persisted LastPublishedAt was not set")
+	}
+}
+
+// TestPhase2_PublishInventorySendsTheConfiguredDisplayName proves ADR
+// 0022's Bridge-side half of the chain: a display name saved through the
+// Settings-page config (bridgeconfig.Config.DisplayName) actually reaches
+// what the Host receives on the wire, not just stored and never read back
+// out at publish time.
+func TestPhase2_PublishInventorySendsTheConfiguredDisplayName(t *testing.T) {
+	fb := newFakeBridgeServer()
+	payload := romfixture.GameBoy("NAMED BRIDGE GAME", 65536, false)
+	seedROM(fb, "gb", "Named Bridge Game.gb", payload)
+	rommSrv := fb.start(t)
+
+	host := &fakeInventoryHost{}
+	hostSrv := host.start(t)
+
+	d, _, _ := joinedDaemon(t, rommSrv.URL, hostSrv.URL)
+
+	set, err := reference.ImportDAT(bytes.NewReader(buildInventoryTestDAT(map[string][]byte{
+		"Named Bridge Game": payload,
+	})), reference.ImportOptions{Platform: protocol.PlatformGB})
+	if err != nil {
+		t.Fatalf("ImportDAT: %v", err)
+	}
+	d.referenceSelections[protocol.PlatformGB] = reference.DefaultProfile().Apply(set)
+
+	cfg, err := d.ConfigStore().Load()
+	if err != nil {
+		t.Fatalf("loading the config to set a display name: %v", err)
+	}
+	cfg.DisplayName = "Dallas's RomM Bridge"
+	if err := d.ConfigStore().Save(cfg); err != nil {
+		t.Fatalf("saving the display name: %v", err)
+	}
+
+	result, err := d.PublishInventory(context.Background())
+	if err != nil {
+		t.Fatalf("PublishInventory: %v", err)
+	}
+	if !result.Published {
+		t.Fatalf("Published = false, want true; SkipReasons: %+v", result.SkipReasons)
+	}
+
+	host.mu.Lock()
+	defer host.mu.Unlock()
+	if host.lastDisplayName != "Dallas's RomM Bridge" {
+		t.Fatalf("the Host received display_name %q, want %q", host.lastDisplayName, "Dallas's RomM Bridge")
 	}
 }
 

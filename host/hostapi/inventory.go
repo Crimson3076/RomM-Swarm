@@ -12,6 +12,11 @@ import (
 type publishInventoryRequest struct {
 	RefreshToken string            `json:"refresh_token"`
 	Manifest     protocol.Manifest `json:"manifest"`
+
+	// DisplayName is the Bridge's own self-declared name (ADR 0022),
+	// optional — see Directory.PublishInventory's own doc comment for the
+	// precedence rule against a Host-set name.
+	DisplayName string `json:"display_name,omitempty"`
 }
 
 // handlePublishInventory is unauthenticated at the route level, the same
@@ -31,7 +36,7 @@ func (s *Server) handlePublishInventory(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	snap, err := s.Directory.PublishInventory(r.Context(), bridgeID, auth.Token(req.RefreshToken), req.Manifest)
+	snap, err := s.Directory.PublishInventory(r.Context(), bridgeID, auth.Token(req.RefreshToken), req.Manifest, req.DisplayName)
 	if err != nil {
 		writeInventoryError(w, err)
 		return

@@ -18,6 +18,7 @@ type settingsData struct {
 	TokenConfigured bool
 	DestinationMode string
 	LibraryRoot     string
+	DisplayName     string
 }
 
 func settingsDataFrom(r *http.Request, s *Server, cfg bridgeconfig.Config) settingsData {
@@ -31,6 +32,7 @@ func settingsDataFrom(r *http.Request, s *Server, cfg bridgeconfig.Config) setti
 		TokenConfigured: cfg.RommToken != "",
 		DestinationMode: mode,
 		LibraryRoot:     cfg.LibraryRoot,
+		DisplayName:     cfg.DisplayName,
 	}
 }
 
@@ -64,6 +66,7 @@ func (s *Server) handleSaveConnection(w http.ResponseWriter, r *http.Request, cf
 	rommToken := r.FormValue("romm_token") // blank means "keep the stored one"
 	mode := protocol.DestinationMode(r.FormValue("destination_mode"))
 	libraryRoot := strings.TrimSpace(r.FormValue("library_root"))
+	displayName := strings.TrimSpace(r.FormValue("display_name"))
 
 	if rommURL == "" {
 		s.settingsError(w, r, cfg, "a RomM URL is required")
@@ -81,6 +84,7 @@ func (s *Server) handleSaveConnection(w http.ResponseWriter, r *http.Request, cf
 	}
 	next.DestinationMode = mode
 	next.LibraryRoot = libraryRoot
+	next.DisplayName = displayName
 
 	if err := s.Backend.ConfigStore().Save(next); err != nil {
 		s.settingsError(w, r, cfg, "could not save settings: "+err.Error())

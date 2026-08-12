@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Crimson3076/RomM-Swarm/bridge/adminui"
+	"github.com/Crimson3076/RomM-Swarm/bridge/bridgeconfig"
 	"github.com/Crimson3076/RomM-Swarm/bridge/hostclient"
 	"github.com/Crimson3076/RomM-Swarm/bridge/publish"
 	"github.com/Crimson3076/RomM-Swarm/bridge/scan"
@@ -132,7 +133,17 @@ func (d *Daemon) PublishInventory(ctx context.Context) (adminui.InventoryPublish
 		return adminui.InventoryPublishResult{}, werr
 	}
 
-	result, err := hostclient.New(swarmCfg.HostURL).PublishInventory(ctx, swarmCfg.BridgeID(), cred.Refresh, manifest)
+	// The RomM-connection config is where a Bridge owner sets its own
+	// display name (ADR 0022, bridge/adminui's Settings page) — a separate
+	// store from swarmCfg, which only knows about the Swarm connection
+	// itself. A load failure here isn't fatal to publishing: it just means
+	// no name is sent, same as if the field were left blank.
+	cfg, err := d.ConfigStore().Load()
+	if err != nil {
+		cfg = bridgeconfig.Config{}
+	}
+
+	result, err := hostclient.New(swarmCfg.HostURL).PublishInventory(ctx, swarmCfg.BridgeID(), cred.Refresh, manifest, cfg.DisplayName)
 	if err != nil {
 		d.finishPublishStatusError(err)
 		return adminui.InventoryPublishResult{}, err

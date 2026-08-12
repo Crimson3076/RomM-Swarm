@@ -154,13 +154,19 @@ type BridgeMembership struct {
 	RevokedAt         time.Time
 	RevokedReason     string
 	CredentialRevoked bool
+
+	// DisplayNameSetByHost reports whether DisplayName was set through the
+	// Host UI (and therefore locks out a Bridge-published name — see
+	// PublishInventory and ADR 0022) or is still whatever the Bridge
+	// itself last published, if anything.
+	DisplayNameSetByHost bool
 }
 
 // ListBridgesForSwarm returns every Bridge enrolled in swarm, most
 // recently joined first.
 func (d *Directory) ListBridgesForSwarm(ctx context.Context, swarm protocol.SwarmID) ([]BridgeMembership, error) {
 	rows, err := d.DB.QueryContext(ctx, `
-		SELECT m.bridge_id, m.display_name, m.joined_at, m.state, m.disabled_at, m.revoked_at, m.revoked_reason,
+		SELECT m.bridge_id, m.display_name, m.display_name_set_by_host, m.joined_at, m.state, m.disabled_at, m.revoked_at, m.revoked_reason,
 		       COALESCE(f.revoked, FALSE)
 		FROM bridge_swarm_memberships m
 		LEFT JOIN bridge_credential_families f ON f.bridge_id = m.bridge_id
@@ -179,7 +185,7 @@ func (d *Directory) ListBridgesForSwarm(ctx context.Context, swarm protocol.Swar
 			revokedAt     sql.NullTime
 			revokedReason sql.NullString
 		)
-		if err := rows.Scan(&bm.BridgeID, &bm.DisplayName, &bm.JoinedAt, &bm.State, &disabledAt, &revokedAt, &revokedReason, &bm.CredentialRevoked); err != nil {
+		if err := rows.Scan(&bm.BridgeID, &bm.DisplayName, &bm.DisplayNameSetByHost, &bm.JoinedAt, &bm.State, &disabledAt, &revokedAt, &revokedReason, &bm.CredentialRevoked); err != nil {
 			return nil, fmt.Errorf("directory: reading Bridge membership row: %w", err)
 		}
 		if disabledAt.Valid {
@@ -252,16 +258,19 @@ func (d *Directory) RemoveBridgeFromSwarm(ctx context.Context, swarm protocol.Sw
 	return nil
 }
 
-// SetBridgeDisplayName sets the Host-assigned, per-Swarm label an owner
-// sees for bridge in swarm. Deliberately Host-authoritative, not
-// Bridge-self-declared — see the schema comment on bridge_swarm_memberships
-// for why. An empty name clears back to showing the BridgeID.
+// SetBridgeDisplayName sets the per-Swarm label an owner sees for bridge
+// in swarm, through the Host UI. A non-empty name marks
+// display_name_set_by_host true, which locks out any name the Bridge
+// itself publishes (see PublishInventory's own precedence logic and ADR
+// 0022) until the owner clears it — setting an empty name here reopens it
+// to whatever the Bridge next publishes, rather than just displaying the
+// BridgeID forever.
 func (d *Directory) SetBridgeDisplayName(ctx context.Context, swarm protocol.SwarmID, bridge protocol.BridgeID, name string) error {
 	result, err := d.DB.ExecContext(ctx, `
 		UPDATE bridge_swarm_memberships
-		SET display_name = $1
-		WHERE swarm_id = $2 AND bridge_id = $3`,
-		name, string(swarm), string(bridge))
+		SET display_name = $1, display_name_set_by_host = $2
+		WHERE swarm_id = $3 AND bridge_id = $4`,
+		name, name != "", string(swarm), string(bridge))
 	if err != nil {
 		return fmt.Errorf("directory: setting Bridge display name: %w", err)
 	}
