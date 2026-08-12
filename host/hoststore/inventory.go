@@ -37,6 +37,20 @@ type InventorySnapshot struct {
 // mutex exists to close); Replace opens and closes its transaction
 // entirely within this one call, which is the property that convention
 // actually cares about.
+//
+// The snapshot row is upserted FIRST, deliberately, before touching
+// inventory_items — not last. Postgres serializes concurrent INSERT ...
+// ON CONFLICT statements targeting the same primary key (the second
+// transaction blocks until the first commits or rolls back, even on the
+// very first insert for that key), so upserting the snapshot row first
+// is what gives two truly concurrent Replace calls for the same
+// (bridge, swarm) their only serialization point — without it, both
+// transactions' DELETEs would run against the same pre-both-commits
+// snapshot under READ COMMITTED and neither would see the other's
+// not-yet-committed inserts, leaving a torn union of both manifests'
+// items behind. This is why host/directory's PublishInventory doesn't
+// need bridgeLocks: the serialization happens here, structurally, not by
+// avoiding concurrency at the caller.
 func (s *InventoryStore) Replace(ctx context.Context, bridge protocol.BridgeID, swarm protocol.SwarmID, manifest protocol.Manifest, publishedAt time.Time) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -44,21 +58,9 @@ func (s *InventoryStore) Replace(ctx context.Context, bridge protocol.BridgeID, 
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM inventory_items WHERE bridge_id = $1 AND swarm_id = $2`,
-		string(bridge), string(swarm)); err != nil {
-		return fmt.Errorf("hoststore: clearing previous inventory items: %w", err)
-	}
-
 	var totalBytes int64
 	for _, item := range manifest.Items {
 		totalBytes += item.Canonical.Size
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO inventory_items (bridge_id, swarm_id, file_id, platform, canonical_size)
-			VALUES ($1, $2, $3, $4, $5)`,
-			string(bridge), string(swarm), string(item.FileID), string(item.Platform), item.Canonical.Size); err != nil {
-			return fmt.Errorf("hoststore: inserting inventory item %s: %w", item.FileID, err)
-		}
 	}
 
 	fingerprints, err := json.Marshal(manifest.Fingerprints)
@@ -80,6 +82,21 @@ func (s *InventoryStore) Replace(ctx context.Context, bridge protocol.BridgeID, 
 		string(bridge), string(swarm), uint64(manifest.Revision), len(manifest.Items), totalBytes,
 		fingerprints, manifest.GeneratedAt, publishedAt); err != nil {
 		return fmt.Errorf("hoststore: upserting inventory snapshot: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM inventory_items WHERE bridge_id = $1 AND swarm_id = $2`,
+		string(bridge), string(swarm)); err != nil {
+		return fmt.Errorf("hoststore: clearing previous inventory items: %w", err)
+	}
+
+	for _, item := range manifest.Items {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO inventory_items (bridge_id, swarm_id, file_id, platform, canonical_size)
+			VALUES ($1, $2, $3, $4, $5)`,
+			string(bridge), string(swarm), string(item.FileID), string(item.Platform), item.Canonical.Size); err != nil {
+			return fmt.Errorf("hoststore: inserting inventory item %s: %w", item.FileID, err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

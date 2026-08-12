@@ -19,18 +19,20 @@ type Directory struct {
 	// Now overrides the clock, for tests. Nil means time.Now.
 	Now func() time.Time
 
-	verifier *auth.Verifier
-	events   *hoststore.EventStore
-	locks    bridgeLocks
+	verifier  *auth.Verifier
+	events    *hoststore.EventStore
+	inventory *hoststore.InventoryStore
+	locks     bridgeLocks
 }
 
 // New returns a Directory backed by db. The schema must already be applied
 // (see hoststore.ApplySchema).
 func New(db *sql.DB) *Directory {
 	return &Directory{
-		DB:       db,
-		verifier: &auth.Verifier{Store: &hoststore.BridgeCredentialStore{DB: db}},
-		events:   &hoststore.EventStore{DB: db},
+		DB:        db,
+		verifier:  &auth.Verifier{Store: &hoststore.BridgeCredentialStore{DB: db}},
+		events:    &hoststore.EventStore{DB: db},
+		inventory: &hoststore.InventoryStore{DB: db},
 	}
 }
 
