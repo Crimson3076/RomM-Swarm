@@ -41,6 +41,7 @@ point.
 | [0015](0015-bridge-daemon-and-admin-ui.md) | Bridge daemon and local admin web UI | no | Accepted |
 | [0016](0016-network-host-identity-slice.md) | Network Host, slice 1: identity, Swarms, invitations, Bridge enrollment | no | Accepted |
 | [0017](0017-bridge-host-enrollment.md) | Bridge identity keys and Host enrollment over the network | no | Accepted |
+| [0018](0018-network-host-web-ui.md) | Network Host web UI | no | Accepted |
 
 ## Phase 0 gate coverage
 
