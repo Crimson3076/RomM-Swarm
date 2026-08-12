@@ -31,10 +31,16 @@
   <h2>Bridges</h2>
   {{if .Bridges}}
   <table class="table">
-    <thead><tr><th>Bridge ID</th><th>Joined</th><th>State</th><th>Credential</th><th></th></tr></thead>
+    <thead><tr><th>Name</th><th>Bridge ID</th><th>Joined</th><th>State</th><th>Credential</th><th></th></tr></thead>
     <tbody>
     {{range .Bridges}}
       <tr>
+        <td>
+          <form method="post" action="/swarms/{{$.Swarm.ID}}/bridges/{{.ID}}/name" class="form-inline">
+            <input type="text" name="display_name" value="{{.DisplayName}}" placeholder="unnamed" size="16">
+            <button type="submit" class="link-button">Save</button>
+          </form>
+        </td>
         <td>{{.ID}}</td>
         <td>{{.JoinedAt}}</td>
         <td>{{.State}}</td>

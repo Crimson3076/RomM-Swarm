@@ -228,6 +228,25 @@ func TestPhase2_SwarmLifecycleCreateInviteRevokeReenroll(t *testing.T) {
 		t.Fatalf("Swarm page did not list the enrolled Bridge: %s", body)
 	}
 
+	// Name it, and confirm the name shows up on the Swarm page afterward.
+	resp, err = client.PostForm(srv.URL+swarmPath+"/bridges/"+string(bridgeID)+"/name", url.Values{
+		"display_name": {"Living Room Shelf"},
+	})
+	if err != nil {
+		t.Fatalf("POST name: %v", err)
+	}
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("POST name: status %d", resp.StatusCode)
+	}
+	resp, err = client.Get(srv.URL + swarmPath)
+	if err != nil {
+		t.Fatalf("GET %s: %v", swarmPath, err)
+	}
+	body, _ = readAll(resp)
+	if !strings.Contains(body, "Living Room Shelf") {
+		t.Fatalf("Swarm page did not show the Bridge's display name: %s", body)
+	}
+
 	// Revoke it.
 	resp, err = client.PostForm(srv.URL+swarmPath+"/bridges/"+string(bridgeID)+"/revoke", nil)
 	if err != nil {

@@ -2,9 +2,31 @@ package hostui
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/Crimson3076/RomM-Swarm/protocol"
 )
+
+// handleSetBridgeName sets the Host-assigned, per-Swarm label an owner sees
+// for this Bridge — see the schema comment on bridge_swarm_memberships for
+// why this is Host-authoritative rather than something the Bridge itself
+// declares.
+func (s *Server) handleSetBridgeName(w http.ResponseWriter, r *http.Request) {
+	swarmID := protocol.SwarmID(r.PathValue("swarmID"))
+	bridgeID := protocol.BridgeID(r.PathValue("bridgeID"))
+
+	if err := r.ParseForm(); err != nil {
+		s.swarmViewError(w, r, swarmID, "could not read the submitted form")
+		return
+	}
+	name := strings.TrimSpace(r.FormValue("display_name"))
+
+	if err := s.Directory.SetBridgeDisplayName(r.Context(), swarmID, bridgeID, name); err != nil {
+		s.swarmViewError(w, r, swarmID, "could not rename Bridge: "+err.Error())
+		return
+	}
+	http.Redirect(w, r, "/swarms/"+string(swarmID), http.StatusSeeOther)
+}
 
 // handleRevokeBridge ends a Bridge's credential family globally, across
 // every Swarm it belongs to — not just the one this page is nested under.

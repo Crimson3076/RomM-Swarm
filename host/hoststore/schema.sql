@@ -70,6 +70,15 @@ CREATE TABLE IF NOT EXISTS bridge_swarm_memberships (
     PRIMARY KEY (bridge_id, swarm_id)
 );
 
+-- Host-assigned, per-Swarm label so an owner managing several Bridges can
+-- tell them apart by something more legible than a BridgeID. Deliberately
+-- not Bridge-self-declared: a Bridge-supplied name would be
+-- attacker-controlled text landing directly in the owner's own dashboard.
+-- Added via ALTER rather than in the CREATE TABLE above so applying the
+-- schema against an already-running database (no migration tool yet;
+-- see the file comment) never requires dropping existing data.
+ALTER TABLE bridge_swarm_memberships ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT '';
+
 -- Mirrors auth.FamilyState exactly. See BridgeCredentialStore.
 CREATE TABLE IF NOT EXISTS bridge_credential_families (
     bridge_id          TEXT PRIMARY KEY REFERENCES bridges(id),

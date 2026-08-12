@@ -63,6 +63,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /swarms/{swarmID}/invitations", s.requireBootstrappedAndAuth(s.handleIssueInvitation))
 	mux.HandleFunc("POST /swarms/{swarmID}/bridges/{bridgeID}/revoke", s.requireBootstrappedAndAuth(s.handleRevokeBridge))
 	mux.HandleFunc("POST /swarms/{swarmID}/bridges/{bridgeID}/reenroll", s.requireBootstrappedAndAuth(s.handleReenrollBridge))
+	mux.HandleFunc("POST /swarms/{swarmID}/bridges/{bridgeID}/name", s.requireBootstrappedAndAuth(s.handleSetBridgeName))
 
 	s.mux = mux
 }

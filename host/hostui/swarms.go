@@ -57,6 +57,7 @@ type invitationSummary struct {
 
 type bridgeSummary struct {
 	ID                string
+	DisplayName       string
 	JoinedAt          string
 	State             string
 	CredentialRevoked bool
@@ -112,6 +113,7 @@ func (s *Server) loadSwarmView(w http.ResponseWriter, r *http.Request) (swarmVie
 	for _, b := range bridges {
 		data.Bridges = append(data.Bridges, bridgeSummary{
 			ID:                string(b.BridgeID),
+			DisplayName:       b.DisplayName,
 			JoinedAt:          b.JoinedAt.Format(time.RFC3339),
 			State:             b.State,
 			CredentialRevoked: b.CredentialRevoked,

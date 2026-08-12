@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Crimson3076/RomM-Swarm/auth"
+	"github.com/Crimson3076/RomM-Swarm/host/directory"
 )
 
 // TestPhase2_ConcurrentRotateIsSerializedByTheMutex is the before/after
@@ -258,5 +259,68 @@ func TestPhase2_ListBridgesForSwarmReflectsRevocation(t *testing.T) {
 	}
 	if len(after) != 1 || !after[0].CredentialRevoked {
 		t.Fatalf("ListBridgesForSwarm after revoke = %+v, want CredentialRevoked true", after)
+	}
+}
+
+func TestPhase2_SetBridgeDisplayName(t *testing.T) {
+	d := newTestDirectory(t)
+	ctx := context.Background()
+
+	owner, err := d.BootstrapOwner(ctx, "owner", "The Owner", "", "the-password")
+	if err != nil {
+		t.Fatalf("BootstrapOwner: %v", err)
+	}
+	swarmID, err := d.CreateSwarm(ctx, owner, "Test Swarm")
+	if err != nil {
+		t.Fatalf("CreateSwarm: %v", err)
+	}
+	code, _, err := d.IssueInvitation(ctx, swarmID, owner, 1, 0)
+	if err != nil {
+		t.Fatalf("IssueInvitation: %v", err)
+	}
+	bridgeID, _, err := d.RedeemInvitation(ctx, code, randomKey(t))
+	if err != nil {
+		t.Fatalf("RedeemInvitation: %v", err)
+	}
+
+	before, err := d.ListBridgesForSwarm(ctx, swarmID)
+	if err != nil {
+		t.Fatalf("ListBridgesForSwarm: %v", err)
+	}
+	if len(before) != 1 || before[0].DisplayName != "" {
+		t.Fatalf("ListBridgesForSwarm before naming = %+v, want an empty DisplayName", before)
+	}
+
+	if err := d.SetBridgeDisplayName(ctx, swarmID, bridgeID, "Living Room Shelf"); err != nil {
+		t.Fatalf("SetBridgeDisplayName: %v", err)
+	}
+
+	after, err := d.ListBridgesForSwarm(ctx, swarmID)
+	if err != nil {
+		t.Fatalf("ListBridgesForSwarm: %v", err)
+	}
+	if len(after) != 1 || after[0].DisplayName != "Living Room Shelf" {
+		t.Fatalf("ListBridgesForSwarm after naming = %+v, want DisplayName \"Living Room Shelf\"", after)
+	}
+
+	// Clearing back to empty is allowed.
+	if err := d.SetBridgeDisplayName(ctx, swarmID, bridgeID, ""); err != nil {
+		t.Fatalf("SetBridgeDisplayName (clear): %v", err)
+	}
+	cleared, err := d.ListBridgesForSwarm(ctx, swarmID)
+	if err != nil {
+		t.Fatalf("ListBridgesForSwarm: %v", err)
+	}
+	if len(cleared) != 1 || cleared[0].DisplayName != "" {
+		t.Fatalf("ListBridgesForSwarm after clearing = %+v, want an empty DisplayName", cleared)
+	}
+
+	// A Bridge that never joined this Swarm can't be renamed through it.
+	otherSwarmID, err := d.CreateSwarm(ctx, owner, "Other Swarm")
+	if err != nil {
+		t.Fatalf("CreateSwarm (other): %v", err)
+	}
+	if err := d.SetBridgeDisplayName(ctx, otherSwarmID, bridgeID, "Should Not Apply"); !errors.Is(err, directory.ErrBridgeNotInSwarm) {
+		t.Fatalf("SetBridgeDisplayName for a Bridge not in the Swarm: err = %v, want ErrBridgeNotInSwarm", err)
 	}
 }

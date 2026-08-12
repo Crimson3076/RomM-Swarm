@@ -134,6 +134,7 @@ func (d *Directory) ReenrollBridge(ctx context.Context, bridge protocol.BridgeID
 // revocation is global; see RevokeBridge's own doc comment.
 type BridgeMembership struct {
 	BridgeID          protocol.BridgeID
+	DisplayName       string
 	JoinedAt          time.Time
 	State             string
 	DisabledAt        time.Time
@@ -146,7 +147,7 @@ type BridgeMembership struct {
 // recently joined first.
 func (d *Directory) ListBridgesForSwarm(ctx context.Context, swarm protocol.SwarmID) ([]BridgeMembership, error) {
 	rows, err := d.DB.QueryContext(ctx, `
-		SELECT m.bridge_id, m.joined_at, m.state, m.disabled_at, m.revoked_at, m.revoked_reason,
+		SELECT m.bridge_id, m.display_name, m.joined_at, m.state, m.disabled_at, m.revoked_at, m.revoked_reason,
 		       COALESCE(f.revoked, FALSE)
 		FROM bridge_swarm_memberships m
 		LEFT JOIN bridge_credential_families f ON f.bridge_id = m.bridge_id
@@ -165,7 +166,7 @@ func (d *Directory) ListBridgesForSwarm(ctx context.Context, swarm protocol.Swar
 			revokedAt     sql.NullTime
 			revokedReason sql.NullString
 		)
-		if err := rows.Scan(&bm.BridgeID, &bm.JoinedAt, &bm.State, &disabledAt, &revokedAt, &revokedReason, &bm.CredentialRevoked); err != nil {
+		if err := rows.Scan(&bm.BridgeID, &bm.DisplayName, &bm.JoinedAt, &bm.State, &disabledAt, &revokedAt, &revokedReason, &bm.CredentialRevoked); err != nil {
 			return nil, fmt.Errorf("directory: reading Bridge membership row: %w", err)
 		}
 		if disabledAt.Valid {
@@ -183,4 +184,32 @@ func (d *Directory) ListBridgesForSwarm(ctx context.Context, swarm protocol.Swar
 		return nil, fmt.Errorf("directory: listing Bridges for Swarm: %w", err)
 	}
 	return out, nil
+}
+
+// ErrBridgeNotInSwarm means bridge has no membership row in swarm — either
+// it never joined, or it belongs to a different Swarm than the one the
+// caller is managing.
+var ErrBridgeNotInSwarm = errors.New("directory: bridge is not a member of this swarm")
+
+// SetBridgeDisplayName sets the Host-assigned, per-Swarm label an owner
+// sees for bridge in swarm. Deliberately Host-authoritative, not
+// Bridge-self-declared — see the schema comment on bridge_swarm_memberships
+// for why. An empty name clears back to showing the BridgeID.
+func (d *Directory) SetBridgeDisplayName(ctx context.Context, swarm protocol.SwarmID, bridge protocol.BridgeID, name string) error {
+	result, err := d.DB.ExecContext(ctx, `
+		UPDATE bridge_swarm_memberships
+		SET display_name = $1
+		WHERE swarm_id = $2 AND bridge_id = $3`,
+		name, string(swarm), string(bridge))
+	if err != nil {
+		return fmt.Errorf("directory: setting Bridge display name: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("directory: setting Bridge display name: %w", err)
+	}
+	if n == 0 {
+		return ErrBridgeNotInSwarm
+	}
+	return nil
 }
