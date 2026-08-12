@@ -5,9 +5,11 @@
   var rows = document.getElementById("library-rows");
   var status = document.getElementById("library-status");
   var platform = table.dataset.platform || "";
-  var offset = parseInt(table.dataset.offset, 10) || 0;
-  var hasMore = table.dataset.hasMore === "true";
+  var refresh = /[?&]refresh=1(&|$)/.test(window.location.search);
+  var offset = 0;
+  var hasMore = true;
   var loading = false;
+  var firstLoad = true;
 
   function escapeHTML(s) {
     var div = document.createElement("div");
@@ -26,30 +28,49 @@
     rows.appendChild(tr);
   }
 
+  function setStatus(total, scanned) {
+    if (offset === 0) {
+      status.textContent = "No items" + (platform ? " on platform \"" + platform + "\"" : "") +
+        ", out of " + scanned + " scanned.";
+      return;
+    }
+    status.textContent = offset + " of " + total + " item(s) shown" +
+      (platform ? " on platform \"" + platform + "\"" : "") + ", out of " + scanned + " scanned" +
+      (hasMore ? ", scroll for more…" : ".");
+  }
+
   function loadMore() {
     if (loading || !hasMore) return;
     loading = true;
+    if (firstLoad) {
+      status.textContent = "Loading your library… this can take a while the first time; cached after that.";
+    }
 
     var url = "/api/library/items?offset=" + offset + "&limit=100";
     if (platform) url += "&platform=" + encodeURIComponent(platform);
+    if (firstLoad && refresh) url += "&refresh=1";
 
     fetch(url)
-      .then(function (resp) { return resp.json(); })
+      .then(function (resp) {
+        if (!resp.ok) throw new Error("request failed");
+        return resp.json();
+      })
       .then(function (data) {
         (data.items || []).forEach(function (item) {
           appendRow(item);
           offset++;
         });
         hasMore = !!data.has_more;
-        if (status) {
-          status.textContent = offset + " item(s) shown" + (platform ? " on platform \"" + platform + "\"" : "") +
-            (hasMore ? ", scroll for more…" : ".");
-        }
+        firstLoad = false;
         loading = false;
+        setStatus(data.total || 0, data.scanned || 0);
         maybeLoadMore();
       })
       .catch(function () {
         loading = false;
+        if (firstLoad) {
+          status.textContent = "Could not load your library. Try reloading the page.";
+        }
       });
   }
 
@@ -71,5 +92,5 @@
     }
   });
 
-  maybeLoadMore();
+  loadMore();
 })();

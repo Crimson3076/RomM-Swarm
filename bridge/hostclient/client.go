@@ -287,6 +287,54 @@ func (c *Client) PublishInventory(ctx context.Context, bridge protocol.BridgeID,
 	}
 }
 
+type setDisplayNameRequest struct {
+	RefreshToken string `json:"refresh_token"`
+	SwarmID      string `json:"swarm_id"`
+	DisplayName  string `json:"display_name"`
+}
+
+// SetDisplayName sends this Bridge's own self-declared display name (ADR
+// 0022) to the Host, independent of publishing any inventory. Matches
+// host/hostapi.handleSetBridgeDisplayName's exact contract: POST
+// /api/bridges/{id}/display-name, {refresh_token, swarm_id, display_name}
+// in, {ok: true} out.
+//
+// Exists because PublishInventory only ever carries a display name
+// alongside a non-empty manifest (bridge/publish.Snapshot refuses to build
+// an empty one) — a Bridge with nothing yet verified to publish would
+// otherwise never get to introduce itself by name at all. Callers use this
+// on that path; the ordinary case still sends the name for free with
+// PublishInventory.
+func (c *Client) SetDisplayName(ctx context.Context, bridge protocol.BridgeID, refresh auth.Token, swarm protocol.SwarmID, displayName string) error {
+	body, err := json.Marshal(setDisplayNameRequest{RefreshToken: string(refresh), SwarmID: string(swarm), DisplayName: displayName})
+	if err != nil {
+		return fmt.Errorf("hostclient: encoding display name request: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, c.timeout())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/bridges/"+string(bridge)+"/display-name", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("hostclient: building display name request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return fmt.Errorf("hostclient: calling set display name: %w", err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusUnauthorized:
+		return auth.ErrUnknownToken
+	default:
+		return fmt.Errorf("hostclient: setting display name failed: %s", responseErrorMessage(resp))
+	}
+}
+
 type errorBody struct {
 	Error string `json:"error"`
 }

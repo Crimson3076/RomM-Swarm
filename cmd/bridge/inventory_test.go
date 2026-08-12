@@ -74,6 +74,12 @@ type fakeInventoryHost struct {
 	lastManifest    protocol.Manifest
 	lastToken       string
 	lastDisplayName string
+
+	// standaloneDisplayNameCalls counts POST /api/bridges/{id}/display-name
+	// requests — the fallback route PublishInventory uses when there's
+	// nothing to publish (ADR 0022's decoupling fix).
+	standaloneDisplayNameCalls int
+	lastStandaloneDisplayName  string
 }
 
 func (h *fakeInventoryHost) start(t *testing.T) *httptest.Server {
@@ -102,6 +108,22 @@ func (h *fakeInventoryHost) start(t *testing.T) *httptest.Server {
 			"published_at":   time.Now().UTC(),
 			"distinct_files": len(req.Manifest.Items),
 		})
+	})
+	mux.HandleFunc("POST /api/bridges/{bridgeID}/display-name", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			RefreshToken string `json:"refresh_token"`
+			SwarmID      string `json:"swarm_id"`
+			DisplayName  string `json:"display_name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		h.mu.Lock()
+		h.standaloneDisplayNameCalls++
+		h.lastStandaloneDisplayName = req.DisplayName
+		h.mu.Unlock()
+		writeJSON(w, map[string]any{"ok": true})
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -317,6 +339,54 @@ func TestPhase2_PublishInventoryWithNoReferenceCatalogueIsInformativeNotAnError(
 	}
 	if saved.LastPublishedRevision != 0 {
 		t.Errorf("LastPublishedRevision = %d, want 0: nothing was published", saved.LastPublishedRevision)
+	}
+}
+
+// TestPhase2_PublishInventoryWithNothingToPublishStillSendsTheDisplayName
+// is the Daemon-level proof for the operator report this fixes: a Bridge
+// with a display name configured, but nothing yet verified to publish (no
+// reference catalogue loaded — the common state before this record), must
+// still get its name to the Host via the standalone /display-name route,
+// not silently drop it because /inventory alone never fires on this path.
+func TestPhase2_PublishInventoryWithNothingToPublishStillSendsTheDisplayName(t *testing.T) {
+	fb := newFakeBridgeServer()
+	payload := romfixture.GameBoy("NAME ONLY GAME", 65536, false)
+	seedROM(fb, "gb", "Name Only Game.gb", payload)
+	rommSrv := fb.start(t)
+
+	host := &fakeInventoryHost{}
+	hostSrv := host.start(t)
+
+	d, _, _ := joinedDaemon(t, rommSrv.URL, hostSrv.URL)
+	// Deliberately no referenceSelections loaded for any platform.
+
+	cfg, err := d.ConfigStore().Load()
+	if err != nil {
+		t.Fatalf("loading the config to set a display name: %v", err)
+	}
+	cfg.DisplayName = "Dallas's RomM Bridge"
+	if err := d.ConfigStore().Save(cfg); err != nil {
+		t.Fatalf("saving the display name: %v", err)
+	}
+
+	result, err := d.PublishInventory(context.Background())
+	if err != nil {
+		t.Fatalf("PublishInventory: %v", err)
+	}
+	if result.Published {
+		t.Fatal("Published = true, want false: nothing was ever verified")
+	}
+
+	host.mu.Lock()
+	defer host.mu.Unlock()
+	if host.receivedCount != 0 {
+		t.Errorf("the fake Host received %d /inventory call(s), want 0: nothing should have been published", host.receivedCount)
+	}
+	if host.standaloneDisplayNameCalls != 1 {
+		t.Fatalf("the fake Host received %d /display-name call(s), want exactly 1", host.standaloneDisplayNameCalls)
+	}
+	if host.lastStandaloneDisplayName != "Dallas's RomM Bridge" {
+		t.Fatalf("the Host received display_name %q, want %q", host.lastStandaloneDisplayName, "Dallas's RomM Bridge")
 	}
 }
 

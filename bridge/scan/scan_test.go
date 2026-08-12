@@ -256,6 +256,57 @@ func TestPhase0_ScanProducesANormalizedManifestFromARomMServer(t *testing.T) {
 	}
 }
 
+// TestOnItemScannedReportsRunningProgress proves the fix for an operator
+// report: a large single-platform scan with no per-item feedback looked
+// indistinguishable from a hang. OnItemScanned must fire once per record,
+// with a strictly increasing count, so a caller can show real progress
+// instead of only "started"/"finished" for the whole platform.
+func TestOnItemScannedReportsRunningProgress(t *testing.T) {
+	verified := romfixture.GameBoy("PROGRESS QUEST", 65536, false)
+	roms := []testROM{
+		{1, "gb", "Progress Quest (USA)", "Progress Quest (USA).gb", verified},
+		{2, "gb", "Second Game (USA)", "Second Game (USA).gb", romfixture.GameBoy("SECOND GAME", 65536, false)},
+		{3, "gb", "Third Game (USA)", "Third Game (USA).gb", romfixture.GameBoy("THIRD GAME", 65536, false)},
+	}
+	srv := testServer(t, roms)
+	defer srv.Close()
+
+	source, _ := setup(t, srv)
+
+	set, err := reference.ImportDAT(bytes.NewReader(buildDAT(map[string][]byte{
+		"Progress Quest (USA)": verified,
+	})), reference.ImportOptions{Platform: protocol.PlatformGB})
+	if err != nil {
+		t.Fatalf("ImportDAT: %v", err)
+	}
+	selection := reference.DefaultProfile().Apply(set)
+
+	var progress []int
+	scanner := &Scanner{
+		Source:        source,
+		Now:           func() time.Time { return time.Date(2026, 8, 6, 12, 0, 0, 0, time.UTC) },
+		OnItemScanned: func(scanned int) { progress = append(progress, scanned) },
+	}
+
+	result, err := scanner.ScanPlatform(context.Background(), PlatformSource{
+		RomMSlug:  "gb",
+		Platform:  protocol.PlatformGB,
+		Selection: selection,
+	})
+	if err != nil {
+		t.Fatalf("ScanPlatform: %v", err)
+	}
+
+	if len(progress) != result.Scanned {
+		t.Fatalf("OnItemScanned fired %d time(s), want once per scanned record (%d)", len(progress), result.Scanned)
+	}
+	for i, count := range progress {
+		if count != i+1 {
+			t.Fatalf("progress[%d] = %d, want %d (a strictly increasing running count)", i, count, i+1)
+		}
+	}
+}
+
 // TestPhase0_ScannedItemsAssembleIntoAPublishableManifest closes the loop the
 // deliverable actually asks for: not just a list of items, but a manifest.
 func TestPhase0_ScannedItemsAssembleIntoAPublishableManifest(t *testing.T) {

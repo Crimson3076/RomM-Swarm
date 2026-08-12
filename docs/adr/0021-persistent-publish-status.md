@@ -100,10 +100,28 @@ becomes fire-and-poll instead of blocking.**
   `publishMu`, just not deduplicated — an accepted, minor inefficiency
   (one redundant rescan in an already-rare window), not a correctness gap.
 
+## Update (2026-08-12): per-item progress added after all
+
+The open question below was resolved by real usage sooner than expected:
+an operator reported a publish that looked hung, stuck at "Scanning gb
+(platform 1 of 5) — 0 item(s) scanned so far" for the whole duration of
+that platform's scan. The cause was exactly what resolved sub-decision 2
+anticipated — each record can mean a real RomM download and four-identity
+analysis, and for a platform with many holdings that legitimately took
+long enough that "platform N of M" alone was indistinguishable from a
+hang.
+
+`bridge/scan.Scanner` gained an optional `OnItemScanned func(scanned int)`
+field, called once per record after it's classified (whether it became an
+`Item` or a `Skipped` entry) — `cmd/bridge`'s `scanHoldings` passes one
+that updates `d.status` after every record, not just at the start and end
+of each platform. `PublishStatus.ItemsScanned` now moves continuously
+during a large platform's scan instead of jumping only at platform
+boundaries. No wire or `PublishStatus` shape change — the same
+`ItemsScanned` field just updates more often.
+
 ## Explicitly out of scope
 
-- Per-item scan progress within a single platform (see resolved
-  sub-decision 2).
 - Persisting `PublishStatus` to disk — it is process-memory only,
   reset on restart. `swarmconn.Config`'s own durable
   `LastPublishedRevision`/`LastPublishedAt` (ADR 0019) is unaffected and
@@ -115,6 +133,5 @@ becomes fire-and-poll instead of blocking.**
 
 ## Open questions
 
-- Whether per-item progress is worth adding later, once real usage shows
-  whether "platform N of M" is granular enough for a very large single
-  platform's scan to still feel responsive.
+- Per-item progress was added; see the 2026-08-12 update above. No open
+  questions remain from this record.

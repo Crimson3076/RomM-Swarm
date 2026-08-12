@@ -312,6 +312,71 @@ func TestPhase2_PublishInventoryWithNoNameLeavesTheExistingLabelAlone(t *testing
 	}
 }
 
+// TestPhase2_SetBridgePublishedDisplayNameWorksWithoutAnyInventory is the
+// core proof for this method's reason to exist: a Bridge that has never
+// published (or never will, having nothing verified) can still introduce
+// itself by name — PublishInventory alone can't do this, since
+// bridge/publish.Snapshot refuses to build an empty manifest.
+func TestPhase2_SetBridgePublishedDisplayNameWorksWithoutAnyInventory(t *testing.T) {
+	d, _, swarmID, bridgeID, _, token := enrolledFixture(t)
+	ctx := context.Background()
+
+	if err := d.SetBridgePublishedDisplayName(ctx, bridgeID, token, swarmID, "Dallas's RomM Bridge"); err != nil {
+		t.Fatalf("SetBridgePublishedDisplayName: %v", err)
+	}
+
+	name, setByHost := bridgeDisplayName(t, d, swarmID, bridgeID)
+	if name != "Dallas's RomM Bridge" || setByHost {
+		t.Fatalf("name = %q, setByHost = %v, want %q and false", name, setByHost, "Dallas's RomM Bridge")
+	}
+}
+
+// TestPhase2_SetBridgePublishedDisplayNameRespectsTheSamePrecedence proves
+// it shares PublishInventory's own Host-overrides-first rule rather than
+// implementing a second, possibly-diverging copy of it.
+func TestPhase2_SetBridgePublishedDisplayNameRespectsTheSamePrecedence(t *testing.T) {
+	d, _, swarmID, bridgeID, _, token := enrolledFixture(t)
+	ctx := context.Background()
+
+	if err := d.SetBridgeDisplayName(ctx, swarmID, bridgeID, "Owner's Chosen Name"); err != nil {
+		t.Fatalf("SetBridgeDisplayName: %v", err)
+	}
+	if err := d.SetBridgePublishedDisplayName(ctx, bridgeID, token, swarmID, "Bridge's Own Name"); err != nil {
+		t.Fatalf("SetBridgePublishedDisplayName: %v", err)
+	}
+
+	name, setByHost := bridgeDisplayName(t, d, swarmID, bridgeID)
+	if name != "Owner's Chosen Name" || !setByHost {
+		t.Fatalf("a Bridge-published name overwrote the Host-set one: name = %q, setByHost = %v, want %q and true",
+			name, setByHost, "Owner's Chosen Name")
+	}
+}
+
+// TestPhase2_SetBridgePublishedDisplayNameRejectsABadToken mirrors
+// PublishInventory's own auth-failure test for the same reason: this route
+// is unauthenticated at the HTTP layer, so Authenticate is the only thing
+// standing between an arbitrary caller and writing a Bridge's label.
+func TestPhase2_SetBridgePublishedDisplayNameRejectsABadToken(t *testing.T) {
+	d, _, swarmID, bridgeID, _, _ := enrolledFixture(t)
+	ctx := context.Background()
+
+	if err := d.SetBridgePublishedDisplayName(ctx, bridgeID, "not-the-real-token", swarmID, "Anyone's Bridge"); !errors.Is(err, auth.ErrUnknownToken) {
+		t.Fatalf("SetBridgePublishedDisplayName with a bad token: err = %v, want auth.ErrUnknownToken", err)
+	}
+}
+
+// TestPhase2_SetBridgePublishedDisplayNameRejectsABridgeNotEnrolledInTheNamedSwarm
+// proves a valid credential for one Swarm can't be used to name a Bridge's
+// membership in a different Swarm it never joined.
+func TestPhase2_SetBridgePublishedDisplayNameRejectsABridgeNotEnrolledInTheNamedSwarm(t *testing.T) {
+	d, _, _, bridgeID, _, token := enrolledFixture(t)
+	ctx := context.Background()
+
+	if err := d.SetBridgePublishedDisplayName(ctx, bridgeID, token, protocol.NewSwarmID(), "Anyone's Bridge"); !errors.Is(err, directory.ErrBridgeNotEnrolledInSwarm) {
+		t.Fatalf("SetBridgePublishedDisplayName against a Swarm never joined: err = %v, want ErrBridgeNotEnrolledInSwarm", err)
+	}
+}
+
 // TestPhase2_ConcurrentPublishInventoryNeverProducesInconsistentState is the
 // positive analogue of TestPhase2_ConcurrentRotateWithoutLockingCorruptsState
 // (host/hoststore/bridgecredentials_test.go): N goroutines calling

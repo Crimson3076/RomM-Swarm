@@ -90,14 +90,8 @@ func (d *Directory) PublishInventory(ctx context.Context, bridge protocol.Bridge
 		Kind: protocol.EventInventorySnapshot, At: now, SwarmID: m.Swarm, ActorBridge: bridge,
 	})
 
-	if bridgeName != "" {
-		if _, err := d.DB.ExecContext(ctx, `
-			UPDATE bridge_swarm_memberships
-			SET display_name = $1
-			WHERE swarm_id = $2 AND bridge_id = $3 AND display_name_set_by_host = FALSE`,
-			bridgeName, string(m.Swarm), string(bridge)); err != nil {
-			return hoststore.InventorySnapshot{}, fmt.Errorf("directory: applying the bridge-published display name: %w", err)
-		}
+	if err := d.applyBridgePublishedDisplayName(ctx, m.Swarm, bridge, bridgeName); err != nil {
+		return hoststore.InventorySnapshot{}, err
 	}
 
 	snap, ok, err := d.inventory.SnapshotFor(ctx, bridge, m.Swarm)
@@ -108,6 +102,61 @@ func (d *Directory) PublishInventory(ctx context.Context, bridge protocol.Bridge
 		return hoststore.InventorySnapshot{}, fmt.Errorf("directory: inventory snapshot missing immediately after a successful publish")
 	}
 	return snap, nil
+}
+
+// applyBridgePublishedDisplayName applies bridgeName as the Bridge's own
+// self-declared display name for swarm — the precedence rule shared by
+// PublishInventory and SetBridgePublishedDisplayName (ADR 0022). A blank
+// bridgeName is a no-op (the Bridge hasn't configured one); a Host-locked
+// name (display_name_set_by_host = TRUE) is also silently a no-op, exactly
+// mirroring the WHERE clause's own precedence — neither is an error, since
+// both are ordinary, expected states.
+func (d *Directory) applyBridgePublishedDisplayName(ctx context.Context, swarm protocol.SwarmID, bridge protocol.BridgeID, bridgeName string) error {
+	if bridgeName == "" {
+		return nil
+	}
+	if _, err := d.DB.ExecContext(ctx, `
+		UPDATE bridge_swarm_memberships
+		SET display_name = $1
+		WHERE swarm_id = $2 AND bridge_id = $3 AND display_name_set_by_host = FALSE`,
+		bridgeName, string(swarm), string(bridge)); err != nil {
+		return fmt.Errorf("directory: applying the bridge-published display name: %w", err)
+	}
+	return nil
+}
+
+// SetBridgePublishedDisplayName lets a Bridge introduce itself by name (ADR
+// 0022) independent of publishing any inventory. PublishInventory only ever
+// carries a display name alongside a non-empty manifest — bridge/publish's
+// Snapshot refuses to build an empty one (ErrNothingToPublish) — so a
+// Bridge with nothing yet verified to publish (no reference catalogue
+// loaded, or none of its holdings verify yet) would otherwise never be able
+// to make its chosen name reach the Host at all. Same
+// Host-overrides-first precedence as PublishInventory's own bridgeName
+// parameter; see applyBridgePublishedDisplayName.
+func (d *Directory) SetBridgePublishedDisplayName(ctx context.Context, bridge protocol.BridgeID, presented auth.Token, swarm protocol.SwarmID, bridgeName string) error {
+	if err := d.verifier.Authenticate(bridge, presented); err != nil {
+		_ = d.events.Record(ctx, protocol.Event{Kind: protocol.EventAuthFailure, At: d.now(), ActorBridge: bridge})
+		return err
+	}
+
+	var disabledAt, revokedAt sql.NullTime
+	err := d.DB.QueryRowContext(ctx, `
+		SELECT disabled_at, revoked_at FROM bridge_swarm_memberships
+		WHERE bridge_id = $1 AND swarm_id = $2`,
+		string(bridge), string(swarm),
+	).Scan(&disabledAt, &revokedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrBridgeNotEnrolledInSwarm
+	}
+	if err != nil {
+		return fmt.Errorf("directory: looking up bridge membership: %w", err)
+	}
+	if disabledAt.Valid || revokedAt.Valid {
+		return ErrBridgeNotEnrolledInSwarm
+	}
+
+	return d.applyBridgePublishedDisplayName(ctx, swarm, bridge, bridgeName)
 }
 
 // SwarmInventorySummary returns swarm-wide inventory arithmetic plus every

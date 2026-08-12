@@ -145,6 +145,52 @@ func TestPhase2_PublishInventoryOverHTTPAppliesTheBridgePublishedName(t *testing
 	}
 }
 
+// TestPhase2_SetBridgeDisplayNameOverHTTP is the wire-level proof for the
+// new /display-name route: a Bridge that has never published any
+// inventory (so /inventory alone could never carry a name — an empty
+// manifest is refused before it ever leaves the Bridge) can still set its
+// own name.
+func TestPhase2_SetBridgeDisplayNameOverHTTP(t *testing.T) {
+	dsn := hoststoretest.SkipWithoutPostgres(t)
+	db := hoststoretest.OpenDB(t, dsn)
+	dir := directory.New(db)
+	s := hostapi.New(dir)
+
+	swarmID, bridgeID, _, refreshToken := enrollTestBridge(t, s)
+
+	resp := doJSON(t, s, http.MethodPost, "/api/bridges/"+bridgeID+"/display-name", "", map[string]any{
+		"refresh_token": refreshToken,
+		"swarm_id":      swarmID,
+		"display_name":  "Dallas's RomM Bridge",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("POST /api/bridges/{id}/display-name: status %d, body %s", resp.Code, resp.Body.String())
+	}
+
+	var name string
+	if err := db.QueryRow(`SELECT display_name FROM bridge_swarm_memberships WHERE bridge_id = $1 AND swarm_id = $2`,
+		bridgeID, swarmID).Scan(&name); err != nil {
+		t.Fatalf("reading the persisted display name: %v", err)
+	}
+	if name != "Dallas's RomM Bridge" {
+		t.Fatalf("persisted display_name = %q, want %q", name, "Dallas's RomM Bridge")
+	}
+}
+
+func TestPhase2_SetBridgeDisplayNameOverHTTPRejectsABadToken(t *testing.T) {
+	s := newTestServer(t)
+	swarmID, bridgeID, _, _ := enrollTestBridge(t, s)
+
+	resp := doJSON(t, s, http.MethodPost, "/api/bridges/"+bridgeID+"/display-name", "", map[string]any{
+		"refresh_token": "not-the-real-token",
+		"swarm_id":      swarmID,
+		"display_name":  "Anyone's Bridge",
+	})
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("POST /api/bridges/{id}/display-name with a bad token: status %d, body %s", resp.Code, resp.Body.String())
+	}
+}
+
 func TestPhase2_PublishInventoryRejectsABadRefreshToken(t *testing.T) {
 	s := newTestServer(t)
 	swarmID, bridgeID, alias, _ := enrollTestBridge(t, s)

@@ -70,6 +70,7 @@ func (s *Server) routes() {
 	// Unauthenticated at the route level, same as enroll/rotate above: the
 	// refresh token in the body is the credential (ADR 0019).
 	mux.HandleFunc("POST /api/bridges/{bridgeID}/inventory", s.handlePublishInventory)
+	mux.HandleFunc("POST /api/bridges/{bridgeID}/display-name", s.handleSetBridgeDisplayName)
 
 	s.mux = mux
 }

@@ -50,9 +50,12 @@
     {{range .Bridges}}
       <tr>
         <td>
-          <form method="post" action="/swarms/{{$.Swarm.ID}}/bridges/{{.ID}}/name" class="form-inline">
+          <span class="bridge-name-display" id="bridge-name-display-{{.ID}}">{{if .DisplayName}}{{.DisplayName}}{{else}}<em>unnamed</em>{{end}}</span>
+          <button type="button" class="link-button bridge-name-edit-toggle" data-display="bridge-name-display-{{.ID}}" data-form="bridge-name-form-{{.ID}}">Edit</button>
+          <form method="post" action="/swarms/{{$.Swarm.ID}}/bridges/{{.ID}}/name" class="form-inline bridge-name-form" id="bridge-name-form-{{.ID}}" hidden>
             <input type="text" name="display_name" value="{{.DisplayName}}" placeholder="unnamed" size="16">
             <button type="submit" class="link-button">Save</button>
+            <button type="button" class="link-button bridge-name-cancel">Cancel</button>
           </form>
         </td>
         <td>{{.ID}}</td>
@@ -81,6 +84,29 @@
   {{else}}
   <p>No Bridges enrolled in this Swarm yet.</p>
   {{end}}
+  <script>
+    (function () {
+      document.querySelectorAll(".bridge-name-edit-toggle").forEach(function (btn) {
+        var display = document.getElementById(btn.dataset.display);
+        var form = document.getElementById(btn.dataset.form);
+        if (!display || !form) return;
+        btn.addEventListener("click", function () {
+          display.hidden = true;
+          btn.hidden = true;
+          form.hidden = false;
+          var input = form.querySelector("input[name=display_name]");
+          input.focus();
+          input.select();
+        });
+        var cancel = form.querySelector(".bridge-name-cancel");
+        cancel.addEventListener("click", function () {
+          form.hidden = true;
+          display.hidden = false;
+          btn.hidden = false;
+        });
+      });
+    })();
+  </script>
 </div>
 
 <div class="card">

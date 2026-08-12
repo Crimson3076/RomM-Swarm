@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/Crimson3076/RomM-Swarm/bridge/adminui"
@@ -39,8 +40,6 @@ func (d *Daemon) scanHoldings(ctx context.Context) ([]protocol.Item, []scan.Skip
 		return nil, nil, errors.New("bridge: not connected to RomM")
 	}
 
-	scanner := &scan.Scanner{Source: &scan.RommSource{Client: conn.Client, Report: conn.Report}}
-
 	platforms := protocol.InitialPlatforms()
 	var items []protocol.Item
 	var skipped []scan.Skipped
@@ -52,6 +51,19 @@ func (d *Daemon) scanHoldings(ctx context.Context) ([]protocol.Item, []scan.Skip
 			continue
 		}
 		d.updateScanProgress(platform, i+1, len(platforms), scannedSoFar)
+
+		platformIndex, platformTotal, baseline := i+1, len(platforms), scannedSoFar
+		scanner := &scan.Scanner{
+			Source: &scan.RommSource{Client: conn.Client, Report: conn.Report},
+			// Each record here can mean a real download and four-identity
+			// analysis — a large platform can take a long time, and
+			// without per-record progress the status page only ever shows
+			// "platform N of M" for the whole duration, indistinguishable
+			// from having hung (the operator report that prompted this).
+			OnItemScanned: func(scannedThisPlatform int) {
+				d.updateScanProgress(platform, platformIndex, platformTotal, baseline+scannedThisPlatform)
+			},
+		}
 		result, err := scanner.ScanPlatform(ctx, scan.PlatformSource{
 			RomMSlug:  string(platform),
 			Platform:  platform,
@@ -97,35 +109,6 @@ func (d *Daemon) PublishInventory(ctx context.Context) (adminui.InventoryPublish
 		return adminui.InventoryPublishResult{}, swarmconn.ErrNotJoined
 	}
 
-	holdings, skipped, err := d.scanHoldings(ctx)
-	if err != nil {
-		d.finishPublishStatusError(err)
-		return adminui.InventoryPublishResult{}, err
-	}
-
-	membership := publish.Membership{
-		Swarm:    swarmCfg.SwarmID,
-		Alias:    swarmCfg.Alias,
-		Policy:   publish.Policy{Swarm: swarmCfg.SwarmID, ShareAll: true},
-		Revision: swarmCfg.LastPublishedRevision,
-	}
-	manifest, err := publish.Snapshot(membership, holdings, time.Now())
-	if errors.Is(err, publish.ErrNothingToPublish) {
-		reasons := map[string]int{}
-		for _, s := range skipped {
-			reasons[s.Reason]++
-		}
-		result := adminui.InventoryPublishResult{SkippedCount: len(skipped), SkipReasons: reasons}
-		d.finishPublishStatusDone(result)
-		return result, nil
-	}
-	if err != nil {
-		d.finishPublishStatusError(err)
-		return adminui.InventoryPublishResult{}, err
-	}
-
-	d.setPublishPhase(adminui.PublishPhasePublishing)
-
 	cred, err := d.credentialStore.Load()
 	if err != nil {
 		werr := fmt.Errorf("bridge: loading the Host credential: %w", err)
@@ -142,6 +125,48 @@ func (d *Daemon) PublishInventory(ctx context.Context) (adminui.InventoryPublish
 	if err != nil {
 		cfg = bridgeconfig.Config{}
 	}
+
+	holdings, skipped, err := d.scanHoldings(ctx)
+	if err != nil {
+		d.finishPublishStatusError(err)
+		return adminui.InventoryPublishResult{}, err
+	}
+
+	membership := publish.Membership{
+		Swarm:    swarmCfg.SwarmID,
+		Alias:    swarmCfg.Alias,
+		Policy:   publish.Policy{Swarm: swarmCfg.SwarmID, ShareAll: true},
+		Revision: swarmCfg.LastPublishedRevision,
+	}
+	manifest, err := publish.Snapshot(membership, holdings, time.Now())
+	if errors.Is(err, publish.ErrNothingToPublish) {
+		// publish.Snapshot refuses to build an empty manifest, so the
+		// ordinary path below — which carries cfg.DisplayName alongside a
+		// real manifest — never runs on this branch. Without this, a
+		// Bridge with nothing yet verified (no reference catalogue
+		// loaded, or nothing on it verifies) could set a display name in
+		// Settings and have it never reach the Host at all. Best-effort:
+		// a failure here doesn't turn an otherwise-informative "nothing
+		// published" result into an error.
+		if cfg.DisplayName != "" {
+			if err := hostclient.New(swarmCfg.HostURL).SetDisplayName(ctx, swarmCfg.BridgeID(), cred.Refresh, swarmCfg.SwarmID, cfg.DisplayName); err != nil {
+				log.Printf("bridge: sending the display name to the Host: %v", err)
+			}
+		}
+		reasons := map[string]int{}
+		for _, s := range skipped {
+			reasons[s.Reason]++
+		}
+		result := adminui.InventoryPublishResult{SkippedCount: len(skipped), SkipReasons: reasons}
+		d.finishPublishStatusDone(result)
+		return result, nil
+	}
+	if err != nil {
+		d.finishPublishStatusError(err)
+		return adminui.InventoryPublishResult{}, err
+	}
+
+	d.setPublishPhase(adminui.PublishPhasePublishing)
 
 	result, err := hostclient.New(swarmCfg.HostURL).PublishInventory(ctx, swarmCfg.BridgeID(), cred.Refresh, manifest, cfg.DisplayName)
 	if err != nil {

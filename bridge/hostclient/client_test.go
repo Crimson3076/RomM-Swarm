@@ -37,6 +37,9 @@ type fakeHost struct {
 	// lastPublishedDisplayName records the last display_name
 	// handlePublishInventory received (ADR 0022).
 	lastPublishedDisplayName string
+	// lastSetDisplayName records the last display_name
+	// handleSetDisplayName received via the standalone route.
+	lastSetDisplayName string
 	// notEnrolledInSwarm, when true, makes the inventory route return 403
 	// with the "not enrolled" message rather than authenticating normally.
 	notEnrolledInSwarm bool
@@ -47,6 +50,7 @@ func newFakeHost() *fakeHost {
 	f.mux.HandleFunc("POST /api/bridges/enroll", f.handleEnroll)
 	f.mux.HandleFunc("POST /api/bridges/{bridgeID}/rotate", f.handleRotate)
 	f.mux.HandleFunc("POST /api/bridges/{bridgeID}/inventory", f.handlePublishInventory)
+	f.mux.HandleFunc("POST /api/bridges/{bridgeID}/display-name", f.handleSetDisplayName)
 	return f
 }
 
@@ -130,6 +134,25 @@ func (f *fakeHost) handlePublishInventory(w http.ResponseWriter, r *http.Request
 		"published_at":   time.Now(),
 		"distinct_files": len(req.Manifest.Items),
 	})
+}
+
+func (f *fakeHost) handleSetDisplayName(w http.ResponseWriter, r *http.Request) {
+	bridgeID := protocol.BridgeID(r.PathValue("bridgeID"))
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+		SwarmID      string `json:"swarm_id"`
+		DisplayName  string `json:"display_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "could not read the request body")
+		return
+	}
+	if bridgeID != f.enrolledBridge || auth.Token(req.RefreshToken) != f.currentToken {
+		writeError(w, http.StatusUnauthorized, "credential not recognised")
+		return
+	}
+	f.lastSetDisplayName = req.DisplayName
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -342,6 +365,50 @@ func TestPublishInventorySendsTheDisplayName(t *testing.T) {
 	}
 	if fake.lastPublishedDisplayName != "Dallas's RomM Bridge" {
 		t.Fatalf("fakeHost received display_name %q, want %q", fake.lastPublishedDisplayName, "Dallas's RomM Bridge")
+	}
+}
+
+// TestSetDisplayNameSendsTheNameOverTheStandaloneRoute is the wire-level
+// proof for the fallback path cmd/bridge takes when there's nothing to
+// publish yet (bridge/publish.Snapshot refuses to build an empty
+// manifest, so PublishInventory alone can't carry a name in that case).
+func TestSetDisplayNameSendsTheNameOverTheStandaloneRoute(t *testing.T) {
+	fake := newFakeHost()
+	fake.validCode = "the-real-code"
+	srv := httptest.NewServer(fake)
+	defer srv.Close()
+
+	client := New(srv.URL)
+	pub := newTestKey(t)
+	enrolled, err := client.Enroll(context.Background(), "the-real-code", pub)
+	if err != nil {
+		t.Fatalf("Enroll: %v", err)
+	}
+
+	if err := client.SetDisplayName(context.Background(), enrolled.BridgeID, enrolled.Refresh, "swm_test0000000000000000000", "Dallas's RomM Bridge"); err != nil {
+		t.Fatalf("SetDisplayName: %v", err)
+	}
+	if fake.lastSetDisplayName != "Dallas's RomM Bridge" {
+		t.Fatalf("fakeHost received display_name %q, want %q", fake.lastSetDisplayName, "Dallas's RomM Bridge")
+	}
+}
+
+func TestSetDisplayNameMapsUnauthorizedToTheSameAuthSentinelError(t *testing.T) {
+	fake := newFakeHost()
+	fake.validCode = "the-real-code"
+	srv := httptest.NewServer(fake)
+	defer srv.Close()
+
+	client := New(srv.URL)
+	pub := newTestKey(t)
+	enrolled, err := client.Enroll(context.Background(), "the-real-code", pub)
+	if err != nil {
+		t.Fatalf("Enroll: %v", err)
+	}
+
+	err = client.SetDisplayName(context.Background(), enrolled.BridgeID, "the-wrong-token", "swm_test0000000000000000000", "Anyone's Bridge")
+	if err != auth.ErrUnknownToken {
+		t.Fatalf("SetDisplayName with a wrong token: err = %v, want auth.ErrUnknownToken", err)
 	}
 }
 

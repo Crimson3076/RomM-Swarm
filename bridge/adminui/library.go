@@ -26,62 +26,35 @@ type libraryItem struct {
 type libraryData struct {
 	baseData
 	Platform string
-	Items    []libraryItem
-	Count    int // filtered items shown so far (this first page)
-	Total    int // filtered items matching Platform, across the whole library
-	Scanned  int // total RomM records, unfiltered
-	HasMore  bool
 }
 
-// handleLibraryPage renders the first page of RomM's inventory, filtered
-// server-side by platform slug — the same approach cmd/swarm-bridge's list
-// subcommand uses, for the same reason (bridge/scan.RommSource.ListROMs's
-// own doc comment): RomM's platform_id query parameter is undocumented and
-// its filtering behaviour is unconfirmed, so filtering is done here
-// instead of trusted to the server.
-//
-// The underlying listing comes from Backend.Library, which caches —
-// without that, every page load (and, before infinite scroll, every one
-// of potentially dozens of paginated RomM requests within a single load)
-// re-fetched RomM's entire inventory from scratch. Pass refresh=1 to force
-// a fresh fetch, for the page's own "Refresh" control.
+// handleLibraryPage renders the page shell only — no items, and no call to
+// Backend.Library, which is why this returns instantly even on a cold
+// cache. It used to call Backend.Library synchronously before rendering
+// anything at all, so a large library (or a cold cache right after a
+// restart) left the browser showing nothing whatsoever until that fetch
+// finished, indistinguishable from the page being frozen. static/library.js
+// fetches the first chunk itself on load, from handleLibraryItems below,
+// and shows a loading message until that arrives — the same information,
+// just visible instead of silent.
 func (s *Server) handleLibraryPage(w http.ResponseWriter, r *http.Request) {
 	data := libraryData{baseData: s.base(r, "Library"), Platform: r.URL.Query().Get("platform")}
 
 	if s.Backend.Connection() == nil {
 		data.Error = "not connected to RomM — check Settings"
-		renderPage(w, "library", data)
-		return
 	}
-
-	forceRefresh := r.URL.Query().Get("refresh") == "1"
-	records, err := s.Backend.Library(r.Context(), forceRefresh)
-	if err != nil {
-		data.Error = "listing RomM's inventory: " + err.Error()
-		renderPage(w, "library", data)
-		return
-	}
-	data.Scanned = len(records)
-
-	filtered := filterByPlatform(records, data.Platform)
-	data.Total = len(filtered)
-
-	page := filtered
-	if len(page) > libraryPageSize {
-		page = page[:libraryPageSize]
-	}
-	data.Items = toLibraryItems(page)
-	data.Count = len(data.Items)
-	data.HasMore = data.Total > len(data.Items)
 
 	renderPage(w, "library", data)
 }
 
-// handleLibraryItems serves one infinite-scroll chunk as JSON. Always
-// reads from cache (never forces a refresh mid-scroll — a scroll session
-// should see one consistent snapshot of the library, not one that shifts
-// underneath it page to page); the page's own "Refresh" control is what
-// bypasses the cache, via handleLibraryPage's refresh=1.
+// handleLibraryItems serves one infinite-scroll chunk as JSON — including
+// the very first chunk the page loads with, now that handleLibraryPage no
+// longer fetches anything itself. refresh=1 forces a fresh RomM listing
+// rather than serving Backend.Library's cache, for the page's "Refresh"
+// control; every other request (every scroll-triggered chunk after the
+// first) always reads from cache, so a scroll session sees one consistent
+// snapshot of the library rather than one that shifts underneath it page
+// to page.
 func (s *Server) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 	if s.Backend.Connection() == nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "not connected to RomM")
@@ -97,8 +70,9 @@ func (s *Server) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > libraryPageSize {
 		limit = libraryPageSize
 	}
+	forceRefresh := r.URL.Query().Get("refresh") == "1"
 
-	records, err := s.Backend.Library(r.Context(), false)
+	records, err := s.Backend.Library(r.Context(), forceRefresh)
 	if err != nil {
 		writeJSONError(w, http.StatusBadGateway, "listing RomM's inventory: "+err.Error())
 		return
@@ -118,6 +92,8 @@ func (s *Server) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{
 		"items":    toLibraryItems(page),
 		"has_more": end < len(filtered),
+		"total":    len(filtered),
+		"scanned":  len(records),
 	})
 }
 

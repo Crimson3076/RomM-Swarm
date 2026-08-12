@@ -59,6 +59,39 @@ func (s *Server) handlePublishInventory(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+type setBridgeDisplayNameRequest struct {
+	RefreshToken string `json:"refresh_token"`
+	SwarmID      string `json:"swarm_id"`
+	DisplayName  string `json:"display_name"`
+}
+
+// handleSetBridgeDisplayName lets a Bridge introduce itself by name (ADR
+// 0022) independent of publishing any inventory — see
+// Directory.SetBridgePublishedDisplayName's own doc comment for why this
+// exists as a separate route rather than only riding along with
+// /inventory. Unauthenticated at the route level, the same bucket as
+// enroll/rotate/inventory: the refresh token in the body is the
+// credential.
+func (s *Server) handleSetBridgeDisplayName(w http.ResponseWriter, r *http.Request) {
+	bridgeID := protocol.BridgeID(r.PathValue("bridgeID"))
+	if err := bridgeID.Validate(); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid bridge id")
+		return
+	}
+
+	var req setBridgeDisplayNameRequest
+	if err := decodeJSON(w, r, &req, defaultMaxBodyBytes); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+
+	if err := s.Directory.SetBridgePublishedDisplayName(r.Context(), bridgeID, auth.Token(req.RefreshToken), protocol.SwarmID(req.SwarmID), req.DisplayName); err != nil {
+		writeInventoryError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 // writeInventoryError maps PublishInventory's distinguished errors to HTTP
 // status codes. Auth-credential errors delegate to writeCredentialError
 // (bridges.go) rather than duplicating its switch.

@@ -127,6 +127,17 @@ type Scanner struct {
 
 	// Now is injectable for tests.
 	Now func() time.Time
+
+	// OnItemScanned, if set, is called after each record in the current
+	// platform finishes (whether it became an Item or a Skipped entry),
+	// with the running count of records processed so far on this platform.
+	// A caller scanning a large single platform can use this to report
+	// real, moving progress instead of only "started"/"finished" for the
+	// whole platform — each record can involve a real download and
+	// four-identity analysis, which for a large library can legitimately
+	// take a long time, and a caller with no visibility into that has no
+	// way to tell "still working" from "hung."
+	OnItemScanned func(scanned int)
 }
 
 func (s *Scanner) analyzer() *verify.Analyzer {
@@ -177,9 +188,12 @@ func (s *Scanner) ScanPlatform(ctx context.Context, ps PlatformSource) (Result, 
 			}
 			if reason != "" {
 				res.Skipped = append(res.Skipped, Skipped{Record: rec, Reason: reason})
-				continue
+			} else {
+				res.Items = append(res.Items, *item)
 			}
-			res.Items = append(res.Items, *item)
+			if s.OnItemScanned != nil {
+				s.OnItemScanned(res.Scanned)
+			}
 		}
 
 		// The page cursor always advances by what the server actually returned,

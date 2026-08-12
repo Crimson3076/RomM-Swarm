@@ -101,6 +101,39 @@ doc) and threads it through to `hostclient.PublishInventory`. A load
 failure here is non-fatal to publishing — it just means no name is sent
 this round, identical in effect to the field being left blank.
 
+## Update (2026-08-12): a name must reach the Host without any inventory
+
+Real testing surfaced a gap the design above didn't cover: `bridgeName` is
+only ever sent alongside a manifest in `PublishInventory`'s request body,
+but `bridge/publish.Snapshot` refuses to build a manifest with zero items
+(`ErrNothingToPublish`, ADR 0019 resolved sub-decision 3). A Bridge with
+nothing yet verified to publish — no reference catalogue loaded for any
+platform, or a scan still in progress — therefore had its configured
+Settings-page name silently never reach the Host at all: an operator could
+set a name and see it simply never show up, with no error anywhere to
+explain why.
+
+**`Directory.SetBridgePublishedDisplayName(ctx, bridge, presented, swarm,
+bridgeName)`** (`host/directory/inventory.go`) is a new, independent
+method that applies the same Host-overrides-first precedence rule
+(extracted into a shared `applyBridgePublishedDisplayName` helper) without
+touching any inventory manifest — only `auth.Verifier.Authenticate` and an
+active-membership check, both of which already exist independent of
+whether the Bridge has ever published. New route: `POST
+/api/bridges/{bridgeID}/display-name`, body `{refresh_token, swarm_id,
+display_name}`, unauthenticated at the route level (same bucket as
+enroll/rotate/inventory — the refresh token in the body is the
+credential). `bridge/hostclient.Client.SetDisplayName` calls it.
+
+`cmd/bridge`'s `Daemon.PublishInventory`, on the `ErrNothingToPublish`
+branch specifically, now calls `hostclient.SetDisplayName` with the
+configured name (if any) before returning its informative "nothing
+published" result — best-effort: a failure here logs and does not turn an
+otherwise-successful "nothing to publish yet" result into an error. The
+ordinary, non-empty-manifest path is unchanged; it still sends the name
+for free alongside `PublishInventory`, so this call only ever fires on the
+path that would otherwise have dropped the name silently.
+
 ## Consequences
 
 - A Bridge's name can change any time by editing Settings — no
