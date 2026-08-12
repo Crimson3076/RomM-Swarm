@@ -218,3 +218,45 @@ func randomKey(t *testing.T) []byte {
 	}
 	return b
 }
+
+func TestPhase2_ListBridgesForSwarmReflectsRevocation(t *testing.T) {
+	d := newTestDirectory(t)
+	ctx := context.Background()
+
+	owner, err := d.BootstrapOwner(ctx, "owner", "The Owner", "", "the-password")
+	if err != nil {
+		t.Fatalf("BootstrapOwner: %v", err)
+	}
+	swarmID, err := d.CreateSwarm(ctx, owner, "Test Swarm")
+	if err != nil {
+		t.Fatalf("CreateSwarm: %v", err)
+	}
+	code, _, err := d.IssueInvitation(ctx, swarmID, owner, 1, 0)
+	if err != nil {
+		t.Fatalf("IssueInvitation: %v", err)
+	}
+	bridgeID, _, err := d.RedeemInvitation(ctx, code, randomKey(t))
+	if err != nil {
+		t.Fatalf("RedeemInvitation: %v", err)
+	}
+
+	before, err := d.ListBridgesForSwarm(ctx, swarmID)
+	if err != nil {
+		t.Fatalf("ListBridgesForSwarm: %v", err)
+	}
+	if len(before) != 1 || before[0].BridgeID != bridgeID || before[0].CredentialRevoked {
+		t.Fatalf("ListBridgesForSwarm before revoke = %+v, want one entry for %s with CredentialRevoked false", before, bridgeID)
+	}
+
+	if err := d.RevokeBridge(ctx, bridgeID, "testing revocation visibility"); err != nil {
+		t.Fatalf("RevokeBridge: %v", err)
+	}
+
+	after, err := d.ListBridgesForSwarm(ctx, swarmID)
+	if err != nil {
+		t.Fatalf("ListBridgesForSwarm: %v", err)
+	}
+	if len(after) != 1 || !after[0].CredentialRevoked {
+		t.Fatalf("ListBridgesForSwarm after revoke = %+v, want CredentialRevoked true", after)
+	}
+}

@@ -2,6 +2,7 @@ package directory
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -54,4 +55,49 @@ func (d *Directory) IssueInvitation(ctx context.Context, swarm protocol.SwarmID,
 		Kind: protocol.EventInvitationIssued, At: now, SwarmID: swarm, ActorUser: issuedBy,
 	})
 	return code, id, nil
+}
+
+// Invitation is one issued invitation, as returned to a caller. The secret
+// code itself is never included — only its hash is ever stored, and even
+// that isn't exposed here; see IssueInvitation's doc comment.
+type Invitation struct {
+	ID        protocol.InvitationID
+	MaxUses   int
+	UseCount  int
+	ExpiresAt time.Time
+	CreatedAt time.Time
+	RevokedAt time.Time
+}
+
+// ListInvitations returns every invitation ever issued for swarm, most
+// recent first.
+func (d *Directory) ListInvitations(ctx context.Context, swarm protocol.SwarmID) ([]Invitation, error) {
+	rows, err := d.DB.QueryContext(ctx, `
+		SELECT id, max_uses, use_count, expires_at, created_at, revoked_at
+		FROM invitations
+		WHERE swarm_id = $1
+		ORDER BY created_at DESC`, string(swarm))
+	if err != nil {
+		return nil, fmt.Errorf("directory: listing invitations: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Invitation
+	for rows.Next() {
+		var (
+			inv       Invitation
+			revokedAt sql.NullTime
+		)
+		if err := rows.Scan(&inv.ID, &inv.MaxUses, &inv.UseCount, &inv.ExpiresAt, &inv.CreatedAt, &revokedAt); err != nil {
+			return nil, fmt.Errorf("directory: reading invitation row: %w", err)
+		}
+		if revokedAt.Valid {
+			inv.RevokedAt = revokedAt.Time
+		}
+		out = append(out, inv)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("directory: listing invitations: %w", err)
+	}
+	return out, nil
 }

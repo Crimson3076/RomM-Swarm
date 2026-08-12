@@ -16,6 +16,21 @@ func newTestDirectory(t *testing.T) *directory.Directory {
 	return directory.New(db)
 }
 
+func TestPhase2_OwnerExists(t *testing.T) {
+	d := newTestDirectory(t)
+	ctx := context.Background()
+
+	if exists, err := d.OwnerExists(ctx); err != nil || exists {
+		t.Fatalf("OwnerExists before bootstrap = %v, %v — want false, no error", exists, err)
+	}
+	if _, err := d.BootstrapOwner(ctx, "owner", "The Owner", "", "a-long-enough-password"); err != nil {
+		t.Fatalf("BootstrapOwner: %v", err)
+	}
+	if exists, err := d.OwnerExists(ctx); err != nil || !exists {
+		t.Fatalf("OwnerExists after bootstrap = %v, %v — want true, no error", exists, err)
+	}
+}
+
 func TestPhase2_BootstrapOwnerSucceedsOnceThenFails(t *testing.T) {
 	d := newTestDirectory(t)
 	ctx := context.Background()

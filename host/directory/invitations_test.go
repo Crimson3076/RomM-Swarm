@@ -72,3 +72,40 @@ func TestPhase2_IssueInvitationDefaultsMaxUsesAndExpiry(t *testing.T) {
 		t.Fatalf("default expiry %s is not comfortably in the future", expiresAt)
 	}
 }
+
+func TestPhase2_ListInvitationsNeverIncludesTheCode(t *testing.T) {
+	d := newTestDirectory(t)
+	ctx := context.Background()
+
+	owner, err := d.BootstrapOwner(ctx, "owner", "The Owner", "", "the-password")
+	if err != nil {
+		t.Fatalf("BootstrapOwner: %v", err)
+	}
+	swarmID, err := d.CreateSwarm(ctx, owner, "Test Swarm")
+	if err != nil {
+		t.Fatalf("CreateSwarm: %v", err)
+	}
+
+	_, id, err := d.IssueInvitation(ctx, swarmID, owner, 3, time.Hour)
+	if err != nil {
+		t.Fatalf("IssueInvitation: %v", err)
+	}
+
+	invitations, err := d.ListInvitations(ctx, swarmID)
+	if err != nil {
+		t.Fatalf("ListInvitations: %v", err)
+	}
+	if len(invitations) != 1 {
+		t.Fatalf("ListInvitations returned %d entries, want 1", len(invitations))
+	}
+	got := invitations[0]
+	if got.ID != id {
+		t.Fatalf("ListInvitations returned id %s, want %s", got.ID, id)
+	}
+	if got.MaxUses != 3 || got.UseCount != 0 {
+		t.Fatalf("ListInvitations = %+v, want MaxUses 3, UseCount 0", got)
+	}
+	if !got.RevokedAt.IsZero() {
+		t.Fatalf("a fresh invitation reports a revocation time: %+v", got)
+	}
+}

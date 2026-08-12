@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/Crimson3076/RomM-Swarm/auth"
 	"github.com/Crimson3076/RomM-Swarm/host/hoststore"
@@ -125,4 +126,61 @@ func (d *Directory) ReenrollBridge(ctx context.Context, bridge protocol.BridgeID
 	}
 	_ = d.events.Record(ctx, protocol.Event{Kind: protocol.EventBridgeReenrolled, At: d.now(), ActorBridge: bridge})
 	return token, nil
+}
+
+// BridgeMembership is one Bridge's membership in one Swarm, as returned to
+// a caller. CredentialRevoked reflects the Bridge's global credential
+// family state (bridge_credential_families), not this membership row —
+// revocation is global; see RevokeBridge's own doc comment.
+type BridgeMembership struct {
+	BridgeID          protocol.BridgeID
+	JoinedAt          time.Time
+	State             string
+	DisabledAt        time.Time
+	RevokedAt         time.Time
+	RevokedReason     string
+	CredentialRevoked bool
+}
+
+// ListBridgesForSwarm returns every Bridge enrolled in swarm, most
+// recently joined first.
+func (d *Directory) ListBridgesForSwarm(ctx context.Context, swarm protocol.SwarmID) ([]BridgeMembership, error) {
+	rows, err := d.DB.QueryContext(ctx, `
+		SELECT m.bridge_id, m.joined_at, m.state, m.disabled_at, m.revoked_at, m.revoked_reason,
+		       COALESCE(f.revoked, FALSE)
+		FROM bridge_swarm_memberships m
+		LEFT JOIN bridge_credential_families f ON f.bridge_id = m.bridge_id
+		WHERE m.swarm_id = $1
+		ORDER BY m.joined_at DESC`, string(swarm))
+	if err != nil {
+		return nil, fmt.Errorf("directory: listing Bridges for Swarm: %w", err)
+	}
+	defer rows.Close()
+
+	var out []BridgeMembership
+	for rows.Next() {
+		var (
+			bm            BridgeMembership
+			disabledAt    sql.NullTime
+			revokedAt     sql.NullTime
+			revokedReason sql.NullString
+		)
+		if err := rows.Scan(&bm.BridgeID, &bm.JoinedAt, &bm.State, &disabledAt, &revokedAt, &revokedReason, &bm.CredentialRevoked); err != nil {
+			return nil, fmt.Errorf("directory: reading Bridge membership row: %w", err)
+		}
+		if disabledAt.Valid {
+			bm.DisabledAt = disabledAt.Time
+		}
+		if revokedAt.Valid {
+			bm.RevokedAt = revokedAt.Time
+		}
+		if revokedReason.Valid {
+			bm.RevokedReason = revokedReason.String
+		}
+		out = append(out, bm)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("directory: listing Bridges for Swarm: %w", err)
+	}
+	return out, nil
 }

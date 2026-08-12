@@ -2,10 +2,19 @@ package directory
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/Crimson3076/RomM-Swarm/protocol"
 )
+
+// ErrSwarmNotFound means account is not a member of swarm, or no such
+// Swarm exists — the two are deliberately not distinguished, the same
+// caution RedeemInvitation already applies to invitation-lookup failures:
+// a caller shouldn't be able to use the error to probe which Swarm IDs
+// exist.
+var ErrSwarmNotFound = errors.New("directory: no such swarm")
 
 // Swarm is one trust group, as returned to a caller. AliasKey is
 // deliberately not exposed here — see protocol/alias.go's own doc comment:
@@ -46,6 +55,25 @@ func (d *Directory) CreateSwarm(ctx context.Context, owner protocol.UserID, name
 
 	_ = d.events.Record(ctx, protocol.Event{Kind: protocol.EventSwarmCreated, At: now, SwarmID: id, ActorUser: owner})
 	return id, nil
+}
+
+// GetSwarm returns one Swarm, scoped to account's membership — the same
+// scoping ListSwarms already applies, just for a single row.
+func (d *Directory) GetSwarm(ctx context.Context, account protocol.UserID, swarm protocol.SwarmID) (Swarm, error) {
+	var s Swarm
+	err := d.DB.QueryRowContext(ctx, `
+		SELECT s.id, s.name
+		FROM swarms s
+		JOIN swarm_memberships m ON m.swarm_id = s.id
+		WHERE m.account_id = $1 AND s.id = $2`, string(account), string(swarm),
+	).Scan(&s.ID, &s.Name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Swarm{}, ErrSwarmNotFound
+	}
+	if err != nil {
+		return Swarm{}, fmt.Errorf("directory: looking up Swarm: %w", err)
+	}
+	return s, nil
 }
 
 // ListSwarms returns every Swarm account belongs to.

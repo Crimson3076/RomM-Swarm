@@ -52,13 +52,24 @@ var (
 	ErrSessionInvalid = errors.New("directory: session is invalid or has expired")
 )
 
+// OwnerExists reports whether the Host's single owner account has been
+// created yet — what host/hostui's /setup page gates on, the same way
+// bridge/adminui's /setup checks AdminPasswordHash.
+func (d *Directory) OwnerExists(ctx context.Context) (bool, error) {
+	var exists bool
+	if err := d.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM accounts WHERE is_owner)`).Scan(&exists); err != nil {
+		return false, fmt.Errorf("directory: checking for an existing owner: %w", err)
+	}
+	return exists, nil
+}
+
 // BootstrapOwner creates the Host's single owner account. Fails once an
 // owner already exists — the JSON-API analogue of bridge/adminui's /setup
 // gate.
 func (d *Directory) BootstrapOwner(ctx context.Context, username, displayName, email, password string) (protocol.UserID, error) {
-	var exists bool
-	if err := d.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM accounts WHERE is_owner)`).Scan(&exists); err != nil {
-		return "", fmt.Errorf("directory: checking for an existing owner: %w", err)
+	exists, err := d.OwnerExists(ctx)
+	if err != nil {
+		return "", err
 	}
 	if exists {
 		return "", ErrOwnerAlreadyExists
