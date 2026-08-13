@@ -98,6 +98,13 @@ func (c *Client) Redact(s string) string {
 // The body is capped: a probe must not be turned into a memory exhaustion by a
 // server that streams indefinitely.
 func (c *Client) Get(ctx context.Context, path string, query url.Values) (int, []byte, error) {
+	return c.get(ctx, path, query, true)
+}
+
+// get performs a GET and optionally presents the configured credential.
+// Authentication is a per-request decision so an unauthenticated specification
+// fetch never mutates shared Client state or races with an authenticated call.
+func (c *Client) get(ctx context.Context, path string, query url.Values, authenticate bool) (int, []byte, error) {
 	const maxBody = 8 << 20
 
 	u := c.BaseURL + path
@@ -110,19 +117,38 @@ func (c *Client) Get(ctx context.Context, path string, query url.Values) (int, [
 		return 0, nil, fmt.Errorf("romm: building request for %s: %w", path, err)
 	}
 	req.Header.Set("Accept", "application/json")
-	if c.Token != "" && c.Scheme.Apply != nil {
+	if authenticate && c.Token != "" && c.Scheme.Apply != nil {
 		c.Scheme.Apply(req, c.Token)
 	}
 
-	resp, err := c.HTTP.Do(req)
+	httpClient := *c.HTTP
+	configuredOrigin := req.URL
+	previousRedirectCheck := httpClient.CheckRedirect
+	httpClient.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if !sameOrigin(configuredOrigin, next.URL) {
+			return fmt.Errorf("romm: refusing redirect from %s to a different origin", configuredOrigin.Redacted())
+		}
+		if previousRedirectCheck != nil {
+			return previousRedirectCheck(next, via)
+		}
+		if len(via) >= 10 {
+			return fmt.Errorf("romm: stopped after 10 redirects")
+		}
+		return nil
+	}
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return 0, nil, fmt.Errorf("romm: requesting %s: %s", path, c.Redact(err.Error()))
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 	if err != nil {
 		return resp.StatusCode, nil, fmt.Errorf("romm: reading %s: %s", path, c.Redact(err.Error()))
+	}
+	if len(body) > maxBody {
+		return resp.StatusCode, nil, fmt.Errorf("romm: reading %s: response exceeds %d bytes", path, maxBody)
 	}
 	return resp.StatusCode, body, nil
 }
@@ -131,10 +157,30 @@ func (c *Client) Get(ctx context.Context, path string, query url.Values) (int, [
 // the OpenAPI document, which is usually public and which must not be a reason
 // to send a token to an endpoint that does not need one.
 func (c *Client) GetUnauthenticated(ctx context.Context, path string) (int, []byte, error) {
-	saved := c.Token
-	c.Token = ""
-	defer func() { c.Token = saved }()
-	return c.Get(ctx, path, nil)
+	return c.get(ctx, path, nil, false)
+}
+
+// sameOrigin reports whether two URLs have the same scheme, host, and effective
+// port. Credentials must never follow redirects away from the RomM origin the
+// operator configured, including redirects that downgrade HTTPS to HTTP.
+func sameOrigin(a, b *url.URL) bool {
+	return strings.EqualFold(a.Scheme, b.Scheme) &&
+		strings.EqualFold(a.Hostname(), b.Hostname()) &&
+		effectivePort(a) == effectivePort(b)
+}
+
+func effectivePort(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	default:
+		return ""
+	}
 }
 
 // Stream performs an authenticated GET and returns the raw response body for
