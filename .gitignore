@@ -27,3 +27,7 @@ romm.env
 .idea/
 .vscode/
 .DS_Store
+
+# Browser test dependencies and screenshots
+/node_modules/
+/browser-results/

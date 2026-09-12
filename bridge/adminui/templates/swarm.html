@@ -1,5 +1,5 @@
 {{define "swarm"}}{{template "header" .}}
-<h1>Swarm</h1>
+<div class="page-heading"><div><p class="eyebrow">Private network</p><h1>Swarm</h1><p>Connect this Bridge to your Host and publish verified inventory.</p></div></div>
 
 <div class="card">
   <h2>Host connection</h2>
@@ -7,7 +7,7 @@
   <p>Joined <strong>{{.HostURL}}</strong> as <code>{{.BridgeID}}</code>.</p>
   <p class="hint">Generation {{.Generation}}{{if .LastRotated}}, last rotated {{.LastRotated}}{{end}}</p>
   <button type="button" id="test-swarm">Test Swarm Connection</button>
-  <span id="test-swarm-result"></span>
+  <span id="test-swarm-result" role="status" aria-live="polite"></span>
   {{else}}
   <p>This Bridge has not joined a Swarm yet.</p>
   {{end}}
@@ -21,7 +21,7 @@
   {{else}}
   <p class="hint">Never published.</p>
   {{end}}
-  <button type="button" id="publish-inventory">Publish Inventory</button>
+  <button type="button" id="publish-inventory" {{if .PublishRunning}}disabled{{end}}>Publish Inventory</button>
   <!--
     Rendered server-side from the live PublishStatus on every load, so a
     reload mid-scan shows the real current state immediately rather than
@@ -29,7 +29,7 @@
     static/swarm.js polls /api/swarm/publish-status to keep this live
     without a reload while running is true.
   -->
-  <div id="publish-status" data-running="{{.PublishRunning}}">
+  <div id="publish-status" data-running="{{.PublishRunning}}" role="status" aria-live="polite">
     {{if .PublishRunning}}
       <p id="publish-status-text">
         {{if eq .PublishPhase "scanning"}}
@@ -52,8 +52,9 @@
 <div class="card">
   <h2>{{if .Joined}}Join a different Swarm{{else}}Join a Swarm{{end}}</h2>
   <form method="post" action="/swarm" class="form">
-    <label for="host_url">Host URL</label>
-    <input type="url" id="host_url" name="host_url" required placeholder="https://host.example.com">
+    <label for="host_url">Host API URL</label>
+    <input type="url" id="host_url" name="host_url" required placeholder="http://host:8081" aria-describedby="host-url-help">
+    <p class="hint" id="host-url-help">Use the API address reachable from the Bridge, usually port 8081. The admin web UI uses port 8082. In the included Docker Compose network, use http://host:8081.</p>
 
     <label for="invitation_code">Invitation code</label>
     <input type="text" id="invitation_code" name="invitation_code" required autocomplete="off">
@@ -62,5 +63,5 @@
   </form>
 </div>
 
-<script src="/static/swarm.js"></script>
+<script src="/static/swarm.js" defer></script>
 {{template "footer" .}}{{end}}

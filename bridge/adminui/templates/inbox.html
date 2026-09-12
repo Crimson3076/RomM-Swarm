@@ -1,62 +1,41 @@
 {{define "inbox"}}{{template "header" .}}
-<h1>Inbox</h1>
-<p>Import a file through the real pipeline: staged, verified, uploaded through
-RomM's chunked upload API, then confirmed once RomM indexes and matches it.
-This writes to your real RomM library.</p>
-
-{{if .InboxConfigured}}
-<div class="card">
-  <h2>From the inbox folder</h2>
-  {{if .InboxFiles}}
-  <table class="table">
-    <thead><tr><th>File</th><th>Size</th><th>Platform</th><th></th></tr></thead>
-    <tbody>
-    {{range .InboxFiles}}
-      <tr>
-        <td>{{.Name}}</td>
-        <td>{{.SizeHuman}}</td>
-        <td>
-          <form method="post" action="/api/import" class="form-inline">
-            <input type="hidden" name="source" value="inbox">
-            <input type="hidden" name="path" value="{{.Name}}">
-            <select name="platform" required>
-              <option value="">choose platform</option>
-              {{range $.Platforms}}
-              <option value="{{.Slug}}">{{.Name}} ({{.Slug}})</option>
-              {{end}}
-            </select>
-            <button type="submit">Import</button>
-          </form>
-        </td>
-      </tr>
-    {{end}}
-    </tbody>
-  </table>
-  {{else}}
-  <p>The inbox folder is empty.</p>
-  {{end}}
-</div>
-{{else}}
-<div class="card">
-  <p>No inbox folder is mounted. Use the upload form below, or configure an
-  inbox volume for large files (see the Dockerfile/compose documentation).</p>
-</div>
-{{end}}
-
+<div class="page-heading"><div><p class="eyebrow">Add to your library</p><h1>Inbox</h1><p>Import a game into your connected RomM server, then follow its progress.</p></div><a href="/activity" class="button secondary">View activity</a></div>
 <div class="card">
   <h2>Upload from your browser</h2>
-  <form method="post" action="/api/import" enctype="multipart/form-data" class="form">
+  <p class="hint">Choose a cartridge image and its platform. Maximum upload: 1 GiB. The Bridge verifies the file before handing it to RomM.</p>
+  <form method="post" action="/api/import" enctype="multipart/form-data" class="form import-form">
     <input type="hidden" name="source" value="upload">
-    <label for="file">File</label>
-    <input type="file" id="file" name="file" required>
+    <label for="file">Game file</label><input type="file" id="file" name="file" required>
     <label for="upload_platform">Platform</label>
     <select id="upload_platform" name="platform" required>
-      <option value="">choose platform</option>
-      {{range .Platforms}}
-      <option value="{{.Slug}}">{{.Name}} ({{.Slug}})</option>
-      {{end}}
+      <option value="">Choose platform</option>
+      {{range .Platforms}}<option value="{{.Slug}}">{{.Name}} ({{.Slug}})</option>{{end}}
     </select>
-    <button type="submit">Upload and import</button>
+    <button type="submit" {{if not .Platforms}}disabled{{end}}>Upload and import</button>
+    <progress class="import-progress" max="100" value="0" aria-label="Upload progress" hidden></progress>
+    <div class="import-result" role="status" aria-live="polite"></div>
   </form>
 </div>
+<div class="card">
+  <h2>From the inbox folder</h2>
+  {{if .InboxConfigured}}
+    {{if .InboxFiles}}
+    <p class="hint">Import these files directly from the Bridge's inbox. Original files stay in the inbox.</p>
+    <div class="table-wrap"><table class="table"><thead><tr><th>File</th><th>Size</th><th>Import</th></tr></thead><tbody>
+    {{range .InboxFiles}}<tr><td>{{.Name}}</td><td>{{.SizeHuman}}</td><td>
+      <form method="post" action="/api/import" class="form-inline import-form">
+        <input type="hidden" name="source" value="inbox"><input type="hidden" name="path" value="{{.Name}}">
+        <select name="platform" aria-label="Platform for {{.Name}}" required><option value="">Choose platform</option>
+          {{range $.Platforms}}<option value="{{.Slug}}">{{.Name}} ({{.Slug}})</option>{{end}}
+        </select>
+        <button type="submit" {{if not $.Platforms}}disabled{{end}}>Import</button>
+        <div class="import-result" role="status" aria-live="polite"></div>
+      </form>
+    </td></tr>{{end}}
+    </tbody></table></div>
+    {{else}}<div class="empty-state"><p>The inbox folder is empty.</p></div>{{end}}
+  {{else}}<p class="muted">No inbox folder is mounted. Use the browser upload above, or mount an inbox folder when starting the Bridge.</p>{{end}}
+</div>
+<p class="hint">Cartridge verification currently covers Game Boy, Game Boy Color, Game Boy Advance, Nintendo DS, and Genesis. A platform listed by RomM can still be unsupported by the verifier.</p>
+<script src="/static/inbox.js" defer></script>
 {{template "footer" .}}{{end}}
