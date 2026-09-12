@@ -1,27 +1,26 @@
 {{define "dashboard"}}{{template "header" .}}
-<h1>Dashboard</h1>
-
-<div class="card">
-  <h2>Connection</h2>
-  {{if .Connected}}
-    <p class="status status-ok">Connected to <strong>{{.RommURL}}</strong>{{if .ServerVersion}} (RomM {{.ServerVersion}}){{end}}</p>
-  {{else}}
-    <p class="status status-bad">Not connected. Check <a href="/settings">Settings</a>.</p>
-  {{end}}
+<div class="page-heading">
+  <div><p class="eyebrow">Your Bridge</p><h1>{{if .DisplayName}}{{.DisplayName}}{{else}}Dashboard{{end}}</h1><p>Manage your RomM library and Swarm connection.</p></div>
+  <a href="/inbox" class="button">Import a game</a>
 </div>
-
+<div class="stats">
+  <div class="card"><span class="stat-label">RomM connection</span><strong class="stat-value">{{if .Connected}}Connected{{else}}Offline{{end}}</strong><span class="hint">{{if .ServerVersion}}RomM {{.ServerVersion}}{{else}}Configure in Settings{{end}}</span></div>
+  <div class="card"><span class="stat-label">Swarm membership</span><strong class="stat-value">{{if .Swarm.Joined}}Joined{{else}}Not joined{{end}}</strong><a href="/swarm">{{if .Swarm.Joined}}Manage connection{{else}}Join with an invitation{{end}}</a></div>
+  <a class="card card-link" href="/activity?filter=active"><span class="stat-label">Active imports</span><strong class="stat-value">{{.Active}}</strong><span class="hint">In the last 50 transfers</span></a>
+  <a class="card card-link" href="/activity?filter=review"><span class="stat-label">Needs review</span><strong class="stat-value {{if .NeedsReview}}status-bad{{end}}">{{.NeedsReview}}</strong><span class="hint">In the last 50 transfers</span></a>
+</div>
+{{if not .Connected}}<div class="flash flash-error">The Bridge has no RomM connection. Open <a href="/settings">Settings</a> to test and save your connection.</div>{{end}}
 <div class="card-grid">
-  <a class="card card-link" href="/library">
-    <h2>Library</h2>
-    <p>Browse what your RomM server already holds, and pull a copy of an item back to local disk.</p>
-  </a>
-  <a class="card card-link" href="/inbox">
-    <h2>Inbox</h2>
-    <p>Import a file into RomM through the real chunked upload pipeline.</p>
-  </a>
-  <a class="card card-link" href="/activity">
-    <h2>Activity</h2>
-    <p>Watch an import move through staging, upload, and RomM's own matching.</p>
-  </a>
+  <a class="card card-link" href="/library"><p class="eyebrow">01 / Browse</p><h2>My library</h2><p>Search titles, filter platforms, and download from your own RomM server.</p></a>
+  <a class="card card-link" href="/inbox"><p class="eyebrow">02 / Add</p><h2>Inbox</h2><p>Upload a game or import one from your mounted inbox folder.</p></a>
+  <a class="card card-link" href="/swarm"><p class="eyebrow">03 / Connect</p><h2>Swarm</h2><p>{{if .Publish.Running}}Inventory publishing is running. Open Swarm to follow its progress.{{else if .Swarm.LastPublishedRevision}}Inventory last published at revision {{.Swarm.LastPublishedRevision}}.{{else}}Join your network and publish eligible, verified holdings.{{end}}</p></a>
+</div>
+<div class="card">
+  <div class="page-heading"><h2>Recent activity</h2><a href="/activity">View all activity</a></div>
+  {{if .Recent}}
+  <div class="table-wrap"><table class="table"><thead><tr><th>Transfer</th><th>Status</th><th>Updated</th></tr></thead><tbody>
+  {{range .Recent}}<tr><td><a href="/activity?id={{.ID}}"><code>{{.ID}}</code></a></td><td><span class="badge {{.Tone}}">{{.Label}}</span></td><td><time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></td></tr>{{end}}
+  </tbody></table></div>
+  {{else}}<div class="empty-state"><h2>No imports yet</h2><p>Start in the Inbox. Progress and any errors will appear here.</p><a href="/inbox">Open Inbox</a></div>{{end}}
 </div>
 {{template "footer" .}}{{end}}
