@@ -4,6 +4,10 @@
 This information is stored only on this Bridge, in its own local config.</p>
 
 <form method="post" action="/setup" class="form">
+  <label for="setup_token">Setup token</label>
+  <input type="password" id="setup_token" name="setup_token" required autocomplete="off">
+  <small>Printed in this Bridge's startup log (<code>docker logs</code>).</small>
+
   <label for="romm_url">RomM URL</label>
   <input type="url" id="romm_url" name="romm_url" placeholder="https://romm.example" required value="{{.RommURL}}">
 

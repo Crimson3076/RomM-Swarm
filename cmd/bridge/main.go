@@ -90,6 +90,9 @@ func main() {
 	defer stopAutoPublish()
 
 	server := adminui.New(d, inboxDir)
+	if !cfg.Configured() || cfg.AdminPasswordHash == "" {
+		fmt.Printf("bridge: setup token (required on /setup): %s\n", server.SetupToken)
+	}
 	httpServer := &http.Server{Addr: *addr, Handler: server}
 
 	serveErr := make(chan error, 1)

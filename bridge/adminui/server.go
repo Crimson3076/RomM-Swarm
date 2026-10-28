@@ -1,7 +1,9 @@
 package adminui
 
 import (
+	"crypto/rand"
 	"embed"
+	"encoding/base64"
 	"html/template"
 	"net/http"
 )
@@ -27,15 +29,30 @@ type Server struct {
 	// index and match it. Zero means protocol.DefaultIngestionTimeout.
 	ImportTimeout string
 
+	// SetupToken is a one-time secret, generated per process and printed to
+	// the Bridge's log by cmd/bridge, that POST /setup requires. Without it
+	// whoever reached an unconfigured Bridge first on the network would own
+	// it. It is not persisted: a restart before setup completes issues a new
+	// one.
+	SetupToken string
+
 	sessions *sessionStore
 	mux      *http.ServeMux
 }
 
 // New builds a ready-to-serve Server.
 func New(backend Backend, inboxDir string) *Server {
-	s := &Server{Backend: backend, InboxDir: inboxDir, sessions: newSessionStore()}
+	s := &Server{Backend: backend, InboxDir: inboxDir, sessions: newSessionStore(), SetupToken: newSetupToken()}
 	s.routes()
 	return s
+}
+
+func newSetupToken() string {
+	b := make([]byte, 18)
+	if _, err := rand.Read(b); err != nil {
+		panic("adminui: generating a setup token: " + err.Error())
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }

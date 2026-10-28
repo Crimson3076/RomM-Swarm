@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,9 +87,8 @@ func TestPhase2_PublishInventoryHappyPathOverHTTP(t *testing.T) {
 		},
 	}
 
-	resp := doJSON(t, s, http.MethodPost, "/api/bridges/"+bridgeID+"/inventory", "", map[string]any{
-		"refresh_token": refreshToken,
-		"manifest":      manifest,
+	resp := doJSON(t, s, http.MethodPost, "/api/bridges/"+bridgeID+"/inventory", refreshToken, map[string]any{
+		"manifest": manifest,
 	})
 	if resp.Code != http.StatusOK {
 		t.Fatalf("POST /api/bridges/{id}/inventory: status %d, body %s", resp.Code, resp.Body.String())
@@ -126,10 +126,9 @@ func TestPhase2_PublishInventoryOverHTTPAppliesTheBridgePublishedName(t *testing
 		Items:         []protocol.Item{validInventoryItem("item-a", protocol.PlatformGB, 100)},
 	}
 
-	resp := doJSON(t, s, http.MethodPost, "/api/bridges/"+bridgeID+"/inventory", "", map[string]any{
-		"refresh_token": refreshToken,
-		"manifest":      manifest,
-		"display_name":  "Bridge's Own Name",
+	resp := doJSON(t, s, http.MethodPost, "/api/bridges/"+bridgeID+"/inventory", refreshToken, map[string]any{
+		"manifest":     manifest,
+		"display_name": "Bridge's Own Name",
 	})
 	if resp.Code != http.StatusOK {
 		t.Fatalf("POST /api/bridges/{id}/inventory: status %d, body %s", resp.Code, resp.Body.String())
@@ -204,9 +203,8 @@ func TestPhase2_PublishInventoryRejectsABadRefreshToken(t *testing.T) {
 		Items:         []protocol.Item{validInventoryItem("item-a", protocol.PlatformGB, 100)},
 	}
 
-	resp := doJSON(t, s, http.MethodPost, "/api/bridges/"+bridgeID+"/inventory", "", map[string]any{
-		"refresh_token": "not-the-real-token",
-		"manifest":      manifest,
+	resp := doJSON(t, s, http.MethodPost, "/api/bridges/"+bridgeID+"/inventory", "not-the-real-token", map[string]any{
+		"manifest": manifest,
 	})
 	if resp.Code != http.StatusUnauthorized {
 		t.Fatalf("POST /api/bridges/{id}/inventory with a bad token: status %d, body %s", resp.Code, resp.Body.String())
@@ -232,9 +230,8 @@ func TestPhase2_PublishInventoryRejectsAnOversizedBody(t *testing.T) {
 		Items:         items,
 	}
 
-	resp := doJSON(t, s, http.MethodPost, "/api/bridges/"+bridgeID+"/inventory", "", map[string]any{
-		"refresh_token": refreshToken,
-		"manifest":      manifest,
+	resp := doJSON(t, s, http.MethodPost, "/api/bridges/"+bridgeID+"/inventory", refreshToken, map[string]any{
+		"manifest": manifest,
 	})
 	if resp.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("POST /api/bridges/{id}/inventory over the size cap: status %d, body %s", resp.Code, resp.Body.String())
@@ -258,5 +255,47 @@ func TestPhase2_MaxBytesReaderRejectsARawOversizedBodyOnAnOrdinaryRoute(t *testi
 
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("POST /api/setup with an oversized raw body: status %d, body %s, want 413", rec.Code, rec.Body.String())
+	}
+}
+
+// TestPhase2_PublishInventoryAuthenticatesBeforeReadingTheBody proves an
+// unauthenticated caller can't make the Host read a body: a bad (or missing)
+// token is rejected with 401 even when the body is far over the size cap,
+// which would otherwise surface as 413.
+func TestPhase2_PublishInventoryAuthenticatesBeforeReadingTheBody(t *testing.T) {
+	s := newTestServer(t)
+	s.MaxInventoryBytes = 256
+	_, bridgeID, _, _ := enrollTestBridge(t, s)
+
+	huge := map[string]any{"manifest": map[string]any{"pad": string(bytes.Repeat([]byte("x"), 4096))}}
+	for name, token := range map[string]string{"bad token": "not-the-real-token", "no token": ""} {
+		resp := doJSON(t, s, http.MethodPost, "/api/bridges/"+bridgeID+"/inventory", token, huge)
+		if resp.Code != http.StatusUnauthorized {
+			t.Errorf("%s: status %d, want 401 (body %s)", name, resp.Code, resp.Body.String())
+		}
+	}
+}
+
+// A present but non-Bearer Authorization header (or a Bearer with no token)
+// is refused with 401 before the body is read, same as a missing one.
+func TestPhase2_PublishInventoryRejectsAMalformedAuthorizationHeader(t *testing.T) {
+	s := newTestServer(t)
+	s.MaxInventoryBytes = 256
+	_, bridgeID, _, refreshToken := enrollTestBridge(t, s)
+
+	huge := `{"manifest":{"pad":"` + string(bytes.Repeat([]byte("x"), 4096)) + `"}}`
+	for name, header := range map[string]string{
+		"basic scheme": "Basic " + refreshToken,
+		"bare token":   refreshToken,
+		"empty bearer": "Bearer ",
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/api/bridges/"+bridgeID+"/inventory", strings.NewReader(huge))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", header)
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s: status %d, want 401 (body %s)", name, rec.Code, rec.Body.String())
+		}
 	}
 }

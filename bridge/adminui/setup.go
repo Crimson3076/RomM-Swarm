@@ -2,6 +2,7 @@ package adminui
 
 import (
 	"context"
+	"crypto/subtle"
 	"net/http"
 	"strings"
 	"time"
@@ -33,6 +34,12 @@ func (s *Server) handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 
 	if err := r.ParseForm(); err != nil {
 		s.setupError(w, r, "could not read the submitted form")
+		return
+	}
+	// Checked before anything else, and before romm.Connect makes an
+	// outbound request to a caller-chosen URL.
+	if subtle.ConstantTimeCompare([]byte(r.FormValue("setup_token")), []byte(s.SetupToken)) != 1 {
+		s.setupError(w, r, "the setup token is missing or wrong — it is printed in this Bridge's startup log")
 		return
 	}
 	rommURL := strings.TrimSpace(r.FormValue("romm_url"))
