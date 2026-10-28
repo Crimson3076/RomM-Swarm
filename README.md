@@ -21,6 +21,17 @@ is proven, what is not, and why.
 
 ---
 
+## Browser client and admin
+
+The repository includes a runnable Bridge client and Network Host admin UI.
+Start them with `docker compose up -d --build`, then open the client on port
+**8080** and the admin on **8082**. Bridges connect to the Host API on **8081**.
+
+See [Web UI setup and workflows](docs/webui.md) for enrollment, reference
+catalogues, library search, imports, activity, admin controls, and validation.
+These interfaces support the existing Bridge/Host operations; live cross-Bridge
+transfers and the separate member portal remain unfinished.
+
 ## Layout
 
 Scope of Work §13.1 asks for `host`, `bridge`, `relay`, `web`, `protocol`, and

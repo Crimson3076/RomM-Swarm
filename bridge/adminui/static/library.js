@@ -1,96 +1,122 @@
-(function () {
-  var table = document.getElementById("library-table");
-  if (!table) return;
+(() => {
+  const form = document.getElementById("library-filter");
+  if (!form) return;
+  const ui = window.SwarmUI;
+  const rows = document.getElementById("library-rows");
+  const status = document.getElementById("library-status");
+  const more = document.getElementById("library-more");
+  const empty = document.getElementById("library-empty");
+  const platform = document.getElementById("platform");
+  const query = document.getElementById("library-query");
+  const order = document.getElementById("library-sort");
+  const table = document.getElementById("library-table");
+  let offset = 0, hasMore = true, loading = false, generation = 0, controller;
+  let filters, forceRefresh = new URLSearchParams(location.search).get("refresh") === "1";
 
-  var rows = document.getElementById("library-rows");
-  var status = document.getElementById("library-status");
-  var platform = table.dataset.platform || "";
-  var refresh = /[?&]refresh=1(&|$)/.test(window.location.search);
-  var offset = 0;
-  var hasMore = true;
-  var loading = false;
-  var firstLoad = true;
-
-  function escapeHTML(s) {
-    var div = document.createElement("div");
-    div.textContent = s;
-    return div.innerHTML;
+  function row(item) {
+    const tr = document.createElement("tr");
+    const title = ui.element("td");
+    title.append(ui.element("strong", item.name || item.fs_name));
+    if (item.name && item.name !== item.fs_name) title.append(ui.element("small", item.fs_name));
+    const action = ui.element("td", undefined, "actions");
+    const link = ui.element("a", "Download");
+    link.href = "/api/library/download?" + new URLSearchParams({id: item.id, name: item.fs_name});
+    link.setAttribute("aria-label", "Download " + (item.name || item.fs_name));
+    action.append(link);
+    tr.append(title, ui.element("td", item.platform_slug), ui.element("td", item.size_human), action);
+    return tr;
   }
 
-  function appendRow(item) {
-    var tr = document.createElement("tr");
-    tr.innerHTML =
-      "<td>" + escapeHTML(item.fs_name) + "</td>" +
-      "<td>" + escapeHTML(item.platform_slug) + "</td>" +
-      "<td>" + escapeHTML(item.size_human) + "</td>" +
-      "<td><a href=\"/api/library/download?id=" + encodeURIComponent(item.id) +
-      "&name=" + encodeURIComponent(item.fs_name) + "\">Download</a></td>";
-    rows.appendChild(tr);
-  }
-
-  function setStatus(total, scanned) {
-    if (offset === 0) {
-      status.textContent = "No items" + (platform ? " on platform \"" + platform + "\"" : "") +
-        ", out of " + scanned + " scanned.";
-      return;
-    }
-    status.textContent = offset + " of " + total + " item(s) shown" +
-      (platform ? " on platform \"" + platform + "\"" : "") + ", out of " + scanned + " scanned" +
-      (hasMore ? ", scroll for more…" : ".");
-  }
-
-  function loadMore() {
+  async function loadMore() {
     if (loading || !hasMore) return;
     loading = true;
-    if (firstLoad) {
-      status.textContent = "Loading your library… this can take a while the first time; cached after that.";
-    }
-
-    var url = "/api/library/items?offset=" + offset + "&limit=100";
-    if (platform) url += "&platform=" + encodeURIComponent(platform);
-    if (firstLoad && refresh) url += "&refresh=1";
-
-    fetch(url)
-      .then(function (resp) {
-        if (!resp.ok) throw new Error("request failed");
-        return resp.json();
-      })
-      .then(function (data) {
-        (data.items || []).forEach(function (item) {
-          appendRow(item);
-          offset++;
-        });
-        hasMore = !!data.has_more;
-        firstLoad = false;
-        loading = false;
-        setStatus(data.total || 0, data.scanned || 0);
-        maybeLoadMore();
-      })
-      .catch(function () {
-        loading = false;
-        if (firstLoad) {
-          status.textContent = "Could not load your library. Try reloading the page.";
-        }
+    const version = generation;
+    more.disabled = true;
+    status.textContent = offset ? "Loading more games..." : "Loading your library. The first request may take longer.";
+    status.className = "";
+    table.setAttribute("aria-busy", "true");
+    const params = new URLSearchParams(filters);
+    params.set("offset", offset);
+    params.set("limit", 100);
+    if (offset === 0 && forceRefresh) params.set("refresh", "1");
+    try {
+      const data = await ui.request("/api/library/items?" + params, {signal: controller.signal});
+      if (version !== generation) return;
+      const fragment = document.createDocumentFragment();
+      data.items.forEach(item => fragment.append(row(item)));
+      rows.append(fragment);
+      offset += data.items.length;
+      hasMore = Boolean(data.has_more);
+      const chosen = filters.get("platform") || "";
+      platform.replaceChildren(ui.element("option", "All platforms"));
+      platform.firstChild.value = "";
+      const slugs = [...new Set([...(data.platforms || []), ...(chosen ? [chosen] : [])])].sort();
+      slugs.forEach(slug => {
+        const option = ui.element("option", slug);
+        option.value = slug;
+        platform.append(option);
       });
-  }
-
-  // Loads more automatically while the table's bottom is already within
-  // view (a short library that doesn't fill the viewport would otherwise
-  // never trigger a scroll event at all), then falls back to the normal
-  // near-the-bottom scroll trigger for everything past the first screen.
-  function maybeLoadMore() {
-    if (!hasMore || loading) return;
-    var rect = table.getBoundingClientRect();
-    if (rect.bottom <= window.innerHeight + 200) {
-      loadMore();
+      platform.value = chosen;
+      status.textContent = offset + " of " + data.total + " matching games shown (" + data.scanned + " in your library).";
+      empty.hidden = data.total !== 0;
+      more.hidden = !hasMore;
+      more.textContent = "Load more";
+      if (forceRefresh) {
+        forceRefresh = false;
+        const clean = new URL(location.href);
+        clean.searchParams.delete("refresh");
+        history.replaceState(null, "", clean);
+      }
+    } catch (error) {
+      if (version !== generation || error.name === "AbortError") return;
+      status.textContent = error.message;
+      status.className = "status-bad";
+      more.hidden = false;
+      more.textContent = "Retry";
+    } finally {
+      if (version === generation) {
+        loading = false;
+        more.disabled = false;
+        table.setAttribute("aria-busy", "false");
+      }
     }
   }
 
-  window.addEventListener("scroll", function () {
-    if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 300) {
-      loadMore();
-    }
+  function reset(refresh) {
+    generation++;
+    if (controller) controller.abort();
+    controller = new AbortController();
+    filters = new URLSearchParams({q: query.value.trim(), platform: platform.value, sort: order.value || "name"});
+    forceRefresh = refresh;
+    offset = 0;
+    hasMore = true;
+    loading = false;
+    rows.replaceChildren();
+    empty.hidden = true;
+    more.hidden = true;
+    loadMore();
+  }
+
+  form.addEventListener("submit", event => {
+    event.preventDefault();
+    const params = new URLSearchParams({q: query.value.trim(), platform: platform.value, sort: order.value});
+    history.pushState(null, "", "/library?" + params);
+    reset(false);
   });
-
-  loadMore();
+  document.getElementById("library-refresh").addEventListener("click", () => reset(true));
+  more.addEventListener("click", loadMore);
+  window.addEventListener("popstate", () => {
+    const params = new URLSearchParams(location.search);
+    query.value = params.get("q") || "";
+    const slug = params.get("platform") || "";
+    if (![...platform.options].some(option => option.value === slug)) {
+      const option = ui.element("option", slug);
+      option.value = slug;
+      platform.append(option);
+    }
+    platform.value = slug;
+    order.value = params.get("sort") || "name";
+    reset(params.get("refresh") === "1");
+  });
+  reset(forceRefresh);
 })();

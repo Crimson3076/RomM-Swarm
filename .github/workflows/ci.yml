@@ -27,6 +27,7 @@ jobs:
           if [ -n "$unformatted" ]; then
             echo "These files are not gofmt-clean:"
             echo "$unformatted"
+            gofmt -d .
             exit 1
           fi
 
@@ -63,7 +64,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U host"
+          --health-cmd "pg_isready -h 127.0.0.1 -U host"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -128,7 +129,7 @@ jobs:
             -e POSTGRES_USER=host -e POSTGRES_PASSWORD=host -e POSTGRES_DB=host \
             postgres:16-alpine
           for i in $(seq 1 30); do
-            if docker exec host-smoke-postgres pg_isready -U host > /dev/null 2>&1; then
+            if docker exec host-smoke-postgres pg_isready -h 127.0.0.1 -U host > /dev/null 2>&1; then
               echo "postgres ready"
               break
             fi
@@ -161,3 +162,67 @@ jobs:
         run: |
           docker rm -f host-smoke host-smoke-postgres || true
           docker network rm host-smoke-net || true
+
+
+  browser:
+    name: Client and admin browser workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: host
+          POSTGRES_PASSWORD: host
+          POSTGRES_DB: host
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U host"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install browser test tools
+        run: |
+          npm install --no-save --package-lock=false playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Build UI fixture and real Host
+        run: |
+          go test -c -o /tmp/swarm-ui-fixture ./bridge/adminui
+          go build -o /tmp/swarm-host ./cmd/host
+      - name: Exercise browser workflows
+        env:
+          HOST_DATABASE_URL: postgres://host:host@localhost:5432/host?sslmode=disable
+          SWARM_UI_FIXTURE_ADDR: 127.0.0.1:8090
+        run: |
+          /tmp/swarm-ui-fixture -test.run '^TestBrowserFixture$' -test.timeout 8m > /tmp/swarm-ui-fixture.log 2>&1 &
+          fixture_pid=$!
+          /tmp/swarm-host > /tmp/swarm-host.log 2>&1 &
+          host_pid=$!
+          trap 'kill "$fixture_pid" "$host_pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8090/healthz >/dev/null && curl -fsS http://127.0.0.1:8082/healthz >/dev/null; then
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              cat /tmp/swarm-ui-fixture.log /tmp/swarm-host.log
+              exit 1
+            fi
+            sleep 1
+          done
+          node tests/browser/webui.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: webui-browser-screenshots
+          path: browser-results/
+          if-no-files-found: ignore

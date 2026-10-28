@@ -1,5 +1,5 @@
 {{define "settings"}}{{template "header" .}}
-<h1>Settings</h1>
+<div class="page-heading"><div><p class="eyebrow">Bridge configuration</p><h1>Settings</h1><p>Manage the RomM connection and your local sign-in.</p></div></div>
 
 <div class="card">
   <h2>RomM connection</h2>
@@ -13,21 +13,15 @@
     <input type="password" id="romm_token" name="romm_token" autocomplete="off"
            placeholder="{{if .TokenConfigured}}configured — leave blank to keep it{{else}}not set{{end}}">
 
-    <label for="destination_mode">Destination mode</label>
-    <select id="destination_mode" name="destination_mode">
-      <option value="api_only" {{if eq .DestinationMode "api_only"}}selected{{end}}>API-only (upload through RomM's own API)</option>
-      <option value="filesystem_publication" {{if eq .DestinationMode "filesystem_publication"}}selected{{end}}>Filesystem publication (write directly into a mounted library)</option>
-    </select>
-
-    <label for="library_root">Library root (filesystem publication mode only)</label>
-    <input type="text" id="library_root" name="library_root" value="{{.LibraryRoot}}" placeholder="/library">
+    <input type="hidden" name="destination_mode" value="api_only">
+    <p class="hint">This Bridge imports through RomM's upload API. RomM controls where imported files are stored.</p>
 
     <label for="display_name">Bridge display name (shown to the Host)</label>
     <input type="text" id="display_name" name="display_name" value="{{.DisplayName}}" placeholder="e.g. Dallas's RomM Bridge">
 
     <button type="submit">Save connection settings</button>
     <button type="button" id="test-connection">Test connection</button>
-    <span id="test-connection-result"></span>
+    <span id="test-connection-result" role="status" aria-live="polite"></span>
   </form>
 </div>
 
@@ -49,5 +43,5 @@
   </form>
 </div>
 
-<script src="/static/settings.js"></script>
+<script src="/static/settings.js" defer></script>
 {{template "footer" .}}{{end}}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 
@@ -18,6 +19,7 @@ const libraryPageSize = 100
 
 type libraryItem struct {
 	ID           string `json:"id"`
+	Name         string `json:"name"`
 	FSName       string `json:"fs_name"`
 	PlatformSlug string `json:"platform_slug"`
 	SizeHuman    string `json:"size_human"`
@@ -26,6 +28,8 @@ type libraryItem struct {
 type libraryData struct {
 	baseData
 	Platform string
+	Query    string
+	Sort     string
 }
 
 // handleLibraryPage renders the page shell only — no items, and no call to
@@ -38,7 +42,7 @@ type libraryData struct {
 // and shows a loading message until that arrives — the same information,
 // just visible instead of silent.
 func (s *Server) handleLibraryPage(w http.ResponseWriter, r *http.Request) {
-	data := libraryData{baseData: s.base(r, "Library"), Platform: r.URL.Query().Get("platform")}
+	data := libraryData{baseData: s.base(r, "Library"), Platform: r.URL.Query().Get("platform"), Query: r.URL.Query().Get("q"), Sort: r.URL.Query().Get("sort")}
 
 	if s.Backend.Connection() == nil {
 		data.Error = "not connected to RomM — check Settings"
@@ -77,12 +81,12 @@ func (s *Server) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadGateway, "listing RomM's inventory: "+err.Error())
 		return
 	}
-	filtered := filterByPlatform(records, platform)
+	filtered := searchLibrary(records, platform, r.URL.Query().Get("q"), r.URL.Query().Get("sort"))
 
-	end := offset + limit
-	if end > len(filtered) {
-		end = len(filtered)
+	if offset > len(filtered) {
+		offset = len(filtered)
 	}
+	end := offset + min(limit, len(filtered)-offset)
 	var page []scan.ROMRecord
 	if offset < len(filtered) {
 		page = filtered[offset:end]
@@ -90,10 +94,11 @@ func (s *Server) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"items":    toLibraryItems(page),
-		"has_more": end < len(filtered),
-		"total":    len(filtered),
-		"scanned":  len(records),
+		"items":     toLibraryItems(page),
+		"has_more":  end < len(filtered),
+		"total":     len(filtered),
+		"scanned":   len(records),
+		"platforms": libraryPlatforms(records),
 	})
 }
 
@@ -114,7 +119,7 @@ func toLibraryItems(records []scan.ROMRecord) []libraryItem {
 	out := make([]libraryItem, 0, len(records))
 	for _, rec := range records {
 		out = append(out, libraryItem{
-			ID: rec.ID, FSName: rec.FSName, PlatformSlug: rec.PlatformSlug,
+			ID: rec.ID, Name: rec.Name, FSName: rec.FSName, PlatformSlug: rec.PlatformSlug,
 			SizeHuman: humanBytes(rec.FSSizeBytes),
 		})
 	}
@@ -145,7 +150,7 @@ func (s *Server) handleLibraryDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rc.Close()
 
-	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
 	if size > 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	}

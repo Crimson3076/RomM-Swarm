@@ -1,34 +1,20 @@
 {{define "activity"}}{{template "header" .}}
-<h1>Activity</h1>
-
-{{if .Detail}}
-<div class="card">
-  <h2>Transfer {{.Detail.ID}}</h2>
-  <table class="table">
-    <thead><tr><th>State</th><th>At</th><th>Detail</th></tr></thead>
-    <tbody>
-    {{range .Detail.History}}
-      <tr><td>{{.To}}</td><td>{{.At}}</td><td>{{.Detail}}</td></tr>
-    {{end}}
-    </tbody>
-  </table>
-  <p><a href="/activity">Back to all activity</a></p>
-</div>
-{{else}}
-<table class="table" id="activity-table">
-  <thead><tr><th>Transfer</th><th>State</th><th></th></tr></thead>
-  <tbody>
-  {{range .Recent}}
-    <tr>
-      <td>{{.ID}}</td>
-      <td class="state-{{.State}}">{{.State}}</td>
-      <td><a href="/activity?id={{.ID}}">Details</a></td>
-    </tr>
+<div class="page-heading"><div><p class="eyebrow">Transfer history</p><h1>Activity</h1><p>Follow imports through verification, upload, and RomM matching.</p></div><a href="/inbox" class="button secondary">Open Inbox</a></div>
+<div class="card" id="activity-view" {{if .Detail}}data-id="{{.Detail.ID}}"{{end}}>
+  {{if .Detail}}
+    <h2>Transfer details</h2><p><code>{{.Detail.ID}}</code></p>
+    <ol class="timeline" id="activity-history">
+      {{range .Detail.History}}<li><strong>{{.To}}</strong><time>{{.At}}</time><p>{{.Detail}}</p></li>{{else}}<li>Waiting for the first recorded update...</li>{{end}}
+    </ol>
+    <a href="/activity">Back to all activity</a>
   {{else}}
-    <tr><td colspan="3">No transfers yet.</td></tr>
+    <div class="toolbar"><div class="search-field"><label for="activity-query">Search transfers</label><input type="search" id="activity-query" placeholder="Transfer ID or details..."></div><div class="field"><label for="activity-filter">Status</label><select id="activity-filter"><option value="all">All activity</option><option value="active">Active</option><option value="review">Needs review</option><option value="complete">Complete</option></select></div></div>
+    <div class="table-wrap"><table class="table" id="activity-table"><thead><tr><th>Transfer</th><th>Status</th><th>Last update</th></tr></thead><tbody id="activity-rows">
+    {{range .Recent}}<tr><td><a href="/activity?id={{.ID}}"><code>{{.ID}}</code></a><small>{{.Detail}}</small></td><td><span class="badge {{.Tone}}">{{.Label}}</span></td><td><time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></td></tr>{{else}}<tr><td colspan="3">No transfers yet.</td></tr>{{end}}
+    </tbody></table></div>
   {{end}}
-  </tbody>
-</table>
-<p class="hint">This page refreshes automatically every 5 seconds.</p>
-{{end}}
+  <div class="pagination"><p id="activity-status" role="status" aria-live="polite">Checking for updates...</p><button type="button" id="activity-refresh" class="secondary">Refresh</button></div>
+</div>
+<p class="hint">Shows the 50 most recently updated transfers. Updates automatically while this tab is visible. Imports that need review stay in the history.</p>
+<script src="/static/activity.js" defer></script>
 {{template "footer" .}}{{end}}

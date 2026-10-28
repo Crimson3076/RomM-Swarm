@@ -1,11 +1,11 @@
 {{define "swarm"}}{{template "header" .}}
-<h1>{{.Swarm.Name}}</h1>
-<p class="hint">Swarm ID: {{.Swarm.ID}}</p>
+<div class="page-heading"><div><p class="eyebrow">Swarm administration</p><h1>{{.Swarm.Name}}</h1><p><code>{{.Swarm.ID}}</code></p></div><a href="/" class="button secondary">All Swarms</a></div>
+<nav class="subnav" aria-label="Swarm sections"><a href="#inventory">Inventory</a><a href="#invitations">Invitations</a><a href="#references">Reference catalogues</a><a href="#bridges">Bridges</a></nav>
 
-<div class="card">
+<section class="card" id="invitations">
   <h2>Invitations</h2>
   {{if .Invitations}}
-  <table class="table">
+  <div class="table-wrap"><table class="table">
     <thead><tr><th>ID</th><th>Uses</th><th>Expires</th><th>Status</th><th></th></tr></thead>
     <tbody>
     {{range .Invitations}}
@@ -13,7 +13,7 @@
         <td>{{.ID}}</td>
         <td>{{.UseCount}}/{{.MaxUses}}</td>
         <td>{{.ExpiresAt}}</td>
-        <td>{{if .Revoked}}<span class="status-bad">revoked</span>{{else}}<span class="status-ok">active</span>{{end}}</td>
+        <td><span class="badge {{if eq .Status "active"}}ok{{else}}muted{{end}}">{{.Status}}</span></td>
         <td>
           <form method="post" action="/swarms/{{$.Swarm.ID}}/invitations/{{.ID}}/delete" class="form-inline">
             <button type="submit" class="link-button" onclick="return confirm('Delete this invitation? Bridges already enrolled through it are not affected.');">Delete</button>
@@ -22,18 +22,27 @@
       </tr>
     {{end}}
     </tbody>
-  </table>
+  </table></div>
   {{else}}
   <p>No invitations issued yet.</p>
   {{end}}
 
-  <form method="post" action="/swarms/{{.Swarm.ID}}/invitations" class="form">
+  <form method="post" action="/swarms/{{.Swarm.ID}}/invitations" class="form form-inline">
+    <div class="field"><label for="max-uses">Maximum uses</label><input type="number" id="max-uses" name="max_uses" value="1" min="1" max="100" required></div>
+    <div class="field"><label for="expires-days">Expires after (days)</label><input type="number" id="expires-days" name="expires_days" value="7" min="1" max="30" required></div>
     <button type="submit">Issue invitation</button>
   </form>
-</div>
+  <p class="hint">The invitation code is shown once after you create it.</p>
+</section>
 
-<div class="card">
+<div class="card" id="inventory">
   <h2>Inventory</h2>
+  <div class="stats">
+    <div><span class="stat-label">Distinct files</span><strong class="stat-value">{{.InventoryDistinctFiles}}</strong></div>
+    <div><span class="stat-label">Published holdings</span><strong class="stat-value">{{.InventoryTotalReplicas}}</strong></div>
+    <div><span class="stat-label">Files on multiple Bridges</span><strong class="stat-value">{{.InventoryDuplicatedFiles}}</strong></div>
+  </div>
+  <p class="hint">These are published snapshots. They do not establish current availability or independent backups.</p>
   {{if .InventoryTotalReplicas}}
   <p>{{.InventoryDistinctFiles}} distinct file(s) across {{.InventoryTotalReplicas}} published holding(s), {{.InventoryDuplicatedFiles}} held by more than one Bridge.</p>
   {{else}}
@@ -41,7 +50,7 @@
   {{end}}
 </div>
 
-<div class="card">
+<div class="card" id="references">
   <h2>Reference catalogues</h2>
   <p class="hint">A reference catalogue is what lets a Bridge tell a genuine,
   verified copy of a game from a hack, a bad dump, or a mislabeled file.
@@ -49,7 +58,7 @@
   automatically before each publish — a Bridge cannot use its own
   catalogue instead for a platform you've loaded one for.</p>
   {{if .ReferenceCatalogues}}
-  <table class="table">
+  <div class="table-wrap"><table class="table">
     <thead><tr><th>Platform</th><th>File</th><th>Entries</th><th>Uploaded</th><th></th></tr></thead>
     <tbody>
     {{range .ReferenceCatalogues}}
@@ -66,7 +75,7 @@
       </tr>
     {{end}}
     </tbody>
-  </table>
+  </table></div>
   {{else}}
   <p>No catalogues loaded yet — nothing published by a Bridge on any platform will verify until you upload one.</p>
   {{end}}
@@ -82,14 +91,20 @@
   </form>
 </div>
 
-<div class="card">
+<div class="card" id="bridges">
   <h2>Bridges</h2>
+  <p class="hint">Credential status controls access. Last published is the age of the inventory snapshot, not a live connectivity check.</p>
   {{if .Bridges}}
-  <table class="table">
+  <div class="toolbar">
+    <div class="search-field"><label for="bridge-query">Find a Bridge</label><input type="search" id="bridge-query" placeholder="Name or Bridge ID"></div>
+    <div class="field"><label for="bridge-filter">Show</label><select id="bridge-filter"><option value="all">All Bridges</option><option value="active">Active credential</option><option value="revoked">Revoked credential</option><option value="unpublished">Not published yet</option></select></div>
+  </div>
+  <p id="bridge-count" class="hint" role="status" aria-live="polite"></p>
+  <div class="table-wrap"><table class="table">
     <thead><tr><th>Name</th><th>Bridge ID</th><th>Joined</th><th>State</th><th>Credential</th><th>Items</th><th>Last published</th><th></th></tr></thead>
     <tbody>
     {{range .Bridges}}
-      <tr>
+      <tr data-bridge data-search="{{.DisplayName}} {{.ID}}" data-credential="{{if .CredentialRevoked}}revoked{{else}}active{{end}}" data-published="{{if .LastPublishedAt}}true{{else}}false{{end}}">
         <td>
           <span class="bridge-name-display" id="bridge-name-display-{{.ID}}">{{if .DisplayName}}{{.DisplayName}}{{else}}<em>unnamed</em>{{end}}</span>
           <button type="button" class="link-button bridge-name-edit-toggle" data-display="bridge-name-display-{{.ID}}" data-form="bridge-name-form-{{.ID}}">Edit</button>
@@ -121,33 +136,11 @@
       </tr>
     {{end}}
     </tbody>
-  </table>
+  </table></div>
   {{else}}
   <p>No Bridges enrolled in this Swarm yet.</p>
   {{end}}
-  <script>
-    (function () {
-      document.querySelectorAll(".bridge-name-edit-toggle").forEach(function (btn) {
-        var display = document.getElementById(btn.dataset.display);
-        var form = document.getElementById(btn.dataset.form);
-        if (!display || !form) return;
-        btn.addEventListener("click", function () {
-          display.hidden = true;
-          btn.hidden = true;
-          form.hidden = false;
-          var input = form.querySelector("input[name=display_name]");
-          input.focus();
-          input.select();
-        });
-        var cancel = form.querySelector(".bridge-name-cancel");
-        cancel.addEventListener("click", function () {
-          form.hidden = true;
-          display.hidden = false;
-          btn.hidden = false;
-        });
-      });
-    })();
-  </script>
+
 </div>
 
 <div class="card">
@@ -155,20 +148,12 @@
   <p>Deleting this Swarm removes its invitations, Bridge memberships, and
   inventory stats. Bridges' own identities and credentials are not
   affected. This cannot be undone.</p>
-  <form method="post" action="/swarms/{{.Swarm.ID}}/delete" class="form" id="delete-swarm-form" onsubmit="return confirm('This is permanent. Delete this Swarm?');">
+  <form method="post" action="/swarms/{{.Swarm.ID}}/delete" class="form" id="delete-swarm-form" data-name="{{.Swarm.Name}}" onsubmit="return confirm('This is permanent. Delete this Swarm?');">
     <label for="confirm_name">Type <strong>{{.Swarm.Name}}</strong> to confirm</label>
     <input type="text" id="confirm_name" name="confirm_name" autocomplete="off" required>
     <button type="submit" id="delete-swarm-button" disabled>Delete Swarm</button>
   </form>
-  <script>
-    (function () {
-      var input = document.getElementById("confirm_name");
-      var button = document.getElementById("delete-swarm-button");
-      var expected = {{.Swarm.Name}};
-      input.addEventListener("input", function () {
-        button.disabled = input.value !== expected;
-      });
-    })();
-  </script>
+
 </div>
+<script src="/static/host.js" defer></script>
 {{template "footer" .}}{{end}}

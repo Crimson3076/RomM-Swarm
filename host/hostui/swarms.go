@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Crimson3076/RomM-Swarm/host/directory"
@@ -17,7 +19,7 @@ func (s *Server) handleCreateSwarm(w http.ResponseWriter, r *http.Request) {
 		s.dashboardError(w, r, "could not read the submitted form")
 		return
 	}
-	name := r.FormValue("name")
+	name := strings.TrimSpace(r.FormValue("name"))
 	if name == "" {
 		s.dashboardError(w, r, "Swarm name is required")
 		return
@@ -123,6 +125,7 @@ type invitationSummary struct {
 	UseCount  int
 	ExpiresAt string
 	Revoked   bool
+	Status    string
 }
 
 type bridgeSummary struct {
@@ -179,6 +182,7 @@ func (s *Server) loadSwarmView(w http.ResponseWriter, r *http.Request) (swarmVie
 			UseCount:  inv.UseCount,
 			ExpiresAt: inv.ExpiresAt.Format(time.RFC3339),
 			Revoked:   !inv.RevokedAt.IsZero(),
+			Status:    invitationStatus(inv, time.Now()),
 		})
 	}
 
@@ -304,7 +308,22 @@ func (s *Server) handleIssueInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	code, _, err := s.Directory.IssueInvitation(r.Context(), swarmID, userFromContext(r.Context()), 0, 0)
+	maxUses, days := 1, 7
+	if raw := r.FormValue("max_uses"); raw != "" {
+		maxUses, err = strconv.Atoi(raw)
+		if err != nil || maxUses < 1 || maxUses > 100 {
+			s.swarmViewError(w, r, swarmID, "Invitation uses must be between 1 and 100.")
+			return
+		}
+	}
+	if raw := r.FormValue("expires_days"); raw != "" {
+		days, err = strconv.Atoi(raw)
+		if err != nil || days < 1 || days > 30 {
+			s.swarmViewError(w, r, swarmID, "Invitation expiry must be between 1 and 30 days.")
+			return
+		}
+	}
+	code, _, err := s.Directory.IssueInvitation(r.Context(), swarmID, userFromContext(r.Context()), maxUses, time.Duration(days)*24*time.Hour)
 	if err != nil {
 		s.swarmViewError(w, r, swarmID, "could not issue invitation: "+err.Error())
 		return
@@ -344,4 +363,17 @@ type secretDisplayData struct {
 	Heading   string
 	Secret    string
 	Notice    string
+}
+
+func invitationStatus(inv directory.Invitation, now time.Time) string {
+	switch {
+	case !inv.RevokedAt.IsZero():
+		return "revoked"
+	case !inv.ExpiresAt.After(now):
+		return "expired"
+	case inv.UseCount >= inv.MaxUses:
+		return "exhausted"
+	default:
+		return "active"
+	}
 }
