@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -271,6 +272,30 @@ func TestPhase2_PublishInventoryAuthenticatesBeforeReadingTheBody(t *testing.T) 
 		resp := doJSON(t, s, http.MethodPost, "/api/bridges/"+bridgeID+"/inventory", token, huge)
 		if resp.Code != http.StatusUnauthorized {
 			t.Errorf("%s: status %d, want 401 (body %s)", name, resp.Code, resp.Body.String())
+		}
+	}
+}
+
+// A present but non-Bearer Authorization header (or a Bearer with no token)
+// is refused with 401 before the body is read, same as a missing one.
+func TestPhase2_PublishInventoryRejectsAMalformedAuthorizationHeader(t *testing.T) {
+	s := newTestServer(t)
+	s.MaxInventoryBytes = 256
+	_, bridgeID, _, refreshToken := enrollTestBridge(t, s)
+
+	huge := `{"manifest":{"pad":"` + string(bytes.Repeat([]byte("x"), 4096)) + `"}}`
+	for name, header := range map[string]string{
+		"basic scheme": "Basic " + refreshToken,
+		"bare token":   refreshToken,
+		"empty bearer": "Bearer ",
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/api/bridges/"+bridgeID+"/inventory", strings.NewReader(huge))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", header)
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s: status %d, want 401 (body %s)", name, rec.Code, rec.Body.String())
 		}
 	}
 }
