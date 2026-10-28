@@ -10,8 +10,9 @@ import (
 )
 
 type publishInventoryRequest struct {
-	RefreshToken string            `json:"refresh_token"`
-	Manifest     protocol.Manifest `json:"manifest"`
+	// The refresh token travels in the Authorization header, not here, so
+	// it can be verified before the body (up to MaxInventoryBytes) is read.
+	Manifest protocol.Manifest `json:"manifest"`
 
 	// DisplayName is the Bridge's own self-declared name (ADR 0022),
 	// optional — see Directory.PublishInventory's own doc comment for the
@@ -20,13 +21,24 @@ type publishInventoryRequest struct {
 }
 
 // handlePublishInventory is unauthenticated at the route level, the same
-// bucket as enroll/rotate: the refresh token in the body is the
-// credential, verified via the read-only Directory.PublishInventory ->
+// bucket as enroll/rotate: the refresh token, sent as a Bearer token, is the
+// credential — checked before the body is read, so an unauthenticated caller
+// can't make the Host buffer a large manifest, verified via the read-only Directory.PublishInventory ->
 // auth.Verifier.Authenticate path rather than a rotation (ADR 0019).
 func (s *Server) handlePublishInventory(w http.ResponseWriter, r *http.Request) {
 	bridgeID := protocol.BridgeID(r.PathValue("bridgeID"))
 	if err := bridgeID.Validate(); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid bridge id")
+		return
+	}
+
+	refresh, ok := bearerToken(r)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "credential not recognised")
+		return
+	}
+	if err := s.Directory.VerifyBridgeCredential(r.Context(), bridgeID, auth.Token(refresh)); err != nil {
+		writeInventoryError(w, err)
 		return
 	}
 
@@ -36,7 +48,7 @@ func (s *Server) handlePublishInventory(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	snap, err := s.Directory.PublishInventory(r.Context(), bridgeID, auth.Token(req.RefreshToken), req.Manifest, req.DisplayName)
+	snap, err := s.Directory.PublishInventory(r.Context(), bridgeID, auth.Token(refresh), req.Manifest, req.DisplayName)
 	if err != nil {
 		writeInventoryError(w, err)
 		return

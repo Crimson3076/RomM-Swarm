@@ -17,6 +17,10 @@ CREATE TABLE IF NOT EXISTS accounts (
     disabled_at   TIMESTAMPTZ
 );
 
+-- At most one owner row: BootstrapOwner's OwnerExists check and INSERT are
+-- separate statements, so two concurrent /setup calls could otherwise both pass.
+CREATE UNIQUE INDEX IF NOT EXISTS accounts_single_owner ON accounts ((TRUE)) WHERE is_owner;
+
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
     account_id TEXT NOT NULL REFERENCES accounts(id),

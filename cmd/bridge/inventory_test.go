@@ -98,7 +98,7 @@ func (h *fakeInventoryHost) start(t *testing.T) *httptest.Server {
 		h.mu.Lock()
 		h.receivedCount++
 		h.lastManifest = req.Manifest
-		h.lastToken = req.RefreshToken
+		h.lastToken = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		h.lastDisplayName = req.DisplayName
 		h.mu.Unlock()
 

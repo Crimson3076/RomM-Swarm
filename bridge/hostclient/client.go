@@ -214,9 +214,8 @@ type PublishInventoryResult struct {
 }
 
 type publishInventoryRequest struct {
-	RefreshToken string            `json:"refresh_token"`
-	Manifest     protocol.Manifest `json:"manifest"`
-	DisplayName  string            `json:"display_name,omitempty"`
+	Manifest    protocol.Manifest `json:"manifest"`
+	DisplayName string            `json:"display_name,omitempty"`
 }
 
 type publishInventoryResponse struct {
@@ -245,7 +244,7 @@ type publishInventoryResponse struct {
 // the caller about which happened; the server's own message is preserved
 // via responseErrorMessage instead.
 func (c *Client) PublishInventory(ctx context.Context, bridge protocol.BridgeID, refresh auth.Token, manifest protocol.Manifest, displayName string) (PublishInventoryResult, error) {
-	body, err := json.Marshal(publishInventoryRequest{RefreshToken: string(refresh), Manifest: manifest, DisplayName: displayName})
+	body, err := json.Marshal(publishInventoryRequest{Manifest: manifest, DisplayName: displayName})
 	if err != nil {
 		return PublishInventoryResult{}, fmt.Errorf("hostclient: encoding inventory publish request: %w", err)
 	}
@@ -261,6 +260,7 @@ func (c *Client) PublishInventory(ctx context.Context, bridge protocol.BridgeID,
 		return PublishInventoryResult{}, fmt.Errorf("hostclient: building inventory publish request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+string(refresh))
 
 	resp, err := c.httpClient().Do(req)
 	if err != nil {

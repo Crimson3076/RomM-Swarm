@@ -110,9 +110,8 @@ func (f *fakeHost) handleRotate(w http.ResponseWriter, r *http.Request) {
 func (f *fakeHost) handlePublishInventory(w http.ResponseWriter, r *http.Request) {
 	bridgeID := protocol.BridgeID(r.PathValue("bridgeID"))
 	var req struct {
-		RefreshToken string            `json:"refresh_token"`
-		Manifest     protocol.Manifest `json:"manifest"`
-		DisplayName  string            `json:"display_name"`
+		Manifest    protocol.Manifest `json:"manifest"`
+		DisplayName string            `json:"display_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "could not read the request body")
@@ -122,7 +121,7 @@ func (f *fakeHost) handlePublishInventory(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusForbidden, "bridge is not actively enrolled in this swarm")
 		return
 	}
-	if bridgeID != f.enrolledBridge || auth.Token(req.RefreshToken) != f.currentToken {
+	if bridgeID != f.enrolledBridge || auth.Token(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) != f.currentToken {
 		writeError(w, http.StatusUnauthorized, "credential not recognised")
 		return
 	}

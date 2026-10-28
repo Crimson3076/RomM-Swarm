@@ -261,6 +261,7 @@ func TestSetupSubmitCreatesConfigAndSession(t *testing.T) {
 
 	jar := newJar(t)
 	resp := doRequest(t, s, jar, http.MethodPost, "/setup", url.Values{
+		"setup_token":      {s.SetupToken},
 		"romm_url":         {rommSrv.URL},
 		"romm_token":       {"tok"},
 		"password":         {"a-long-enough-password"},
@@ -306,6 +307,7 @@ func TestSetupPreservesDestinationSettingsSeededByBootstrap(t *testing.T) {
 	}
 
 	resp := doRequest(t, s, nil, http.MethodPost, "/setup", url.Values{
+		"setup_token":      {s.SetupToken},
 		"romm_url":         {rommSrv.URL},
 		"romm_token":       {"tok"},
 		"password":         {"a-long-enough-password"},
@@ -330,6 +332,7 @@ func TestSetupRejectsAMismatchedPasswordConfirmation(t *testing.T) {
 	s, backend := newTestServer(t)
 
 	resp := doRequest(t, s, nil, http.MethodPost, "/setup", url.Values{
+		"setup_token":      {s.SetupToken},
 		"romm_url":         {rommSrv.URL},
 		"romm_token":       {"tok"},
 		"password":         {"a-long-enough-password"},
@@ -1117,4 +1120,39 @@ func newMinimalFakeRomm(t *testing.T) *httptest.Server {
 func writeTestJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func TestSetupRejectsAMissingOrWrongSetupToken(t *testing.T) {
+	rommSrv := newMinimalFakeRomm(t)
+	s, backend := newTestServer(t)
+
+	for name, token := range map[string]string{"missing": "", "wrong": "guess"} {
+		resp := doRequest(t, s, nil, http.MethodPost, "/setup", url.Values{
+			"setup_token":      {token},
+			"romm_url":         {rommSrv.URL},
+			"romm_token":       {"tok"},
+			"password":         {"a-long-enough-password"},
+			"password_confirm": {"a-long-enough-password"},
+		})
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("%s setup token: status %d, want 422", name, resp.StatusCode)
+		}
+		if cfg, _ := backend.store.Load(); cfg.AdminPasswordHash != "" || cfg.RommURL != "" {
+			t.Fatalf("%s setup token still saved configuration", name)
+		}
+	}
+}
+
+func TestActivityRejectsAMalformedTransferID(t *testing.T) {
+	s, _ := loggedInServerWithBackend(t, "https://x", "t")
+	token := mustSessionToken(t, s)
+
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/activity?id=../../etc/passwd", nil)
+	r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	s.ServeHTTP(rec, r)
+
+	if !strings.Contains(rec.Body.String(), "invalid transfer id") {
+		t.Fatalf("a path-shaped id was not rejected: %s", rec.Body.String())
+	}
 }

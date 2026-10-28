@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/Crimson3076/RomM-Swarm/protocol"
 )
 
@@ -89,6 +91,10 @@ func (d *Directory) BootstrapOwner(ctx context.Context, username, displayName, e
 		INSERT INTO accounts (id, username, display_name, email, password_hash, is_owner, created_at)
 		VALUES ($1, $2, $3, $4, $5, TRUE, $6)`,
 		string(id), username, displayName, emailArg, hash, d.now())
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "accounts_single_owner" {
+		return "", ErrOwnerAlreadyExists
+	}
 	if err != nil {
 		return "", fmt.Errorf("directory: creating the owner account: %w", err)
 	}

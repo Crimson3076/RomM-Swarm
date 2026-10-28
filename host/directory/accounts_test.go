@@ -2,6 +2,7 @@ package directory_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -122,5 +123,35 @@ func TestPhase2_ExpiredSessionIsRejected(t *testing.T) {
 	d.Now = func() time.Time { return now.Add(25 * time.Hour) }
 	if _, err := d.ValidateSession(ctx, token); err != directory.ErrSessionInvalid {
 		t.Fatalf("ValidateSession after expiry: err = %v, want ErrSessionInvalid", err)
+	}
+}
+
+// TestPhase2_ConcurrentBootstrapOwnerCreatesExactlyOne races BootstrapOwner
+// calls: OwnerExists and the INSERT are separate statements, so without the
+// accounts_single_owner unique index more than one could win.
+func TestPhase2_ConcurrentBootstrapOwnerCreatesExactlyOne(t *testing.T) {
+	d := newTestDirectory(t)
+	ctx := context.Background()
+
+	const n = 8
+	results := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			_, err := d.BootstrapOwner(ctx, fmt.Sprintf("owner-%d", i), "Owner", "", "a-long-enough-password")
+			results <- err
+		}(i)
+	}
+	wins := 0
+	for i := 0; i < n; i++ {
+		switch err := <-results; err {
+		case nil:
+			wins++
+		case directory.ErrOwnerAlreadyExists:
+		default:
+			t.Errorf("BootstrapOwner: unexpected error %v", err)
+		}
+	}
+	if wins != 1 {
+		t.Fatalf("%d concurrent BootstrapOwner calls succeeded, want exactly 1", wins)
 	}
 }

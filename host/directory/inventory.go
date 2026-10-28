@@ -25,6 +25,17 @@ var ErrBridgeNotEnrolledInSwarm = errors.New("directory: bridge is not actively 
 // reject.
 var ErrInventoryAliasMismatch = errors.New("directory: manifest alias does not match the bridge's swarm-scoped alias")
 
+// VerifyBridgeCredential is the same read-only credential check
+// PublishInventory starts with, exposed so the HTTP layer can authenticate a
+// request before reading its (potentially very large) body.
+func (d *Directory) VerifyBridgeCredential(ctx context.Context, bridge protocol.BridgeID, presented auth.Token) error {
+	if err := d.verifier.Authenticate(bridge, presented); err != nil {
+		_ = d.events.Record(ctx, protocol.Event{Kind: protocol.EventAuthFailure, At: d.now(), ActorBridge: bridge})
+		return err
+	}
+	return nil
+}
+
 // PublishInventory authenticates bridge — a read-only credential check, not
 // a rotation; see auth.Verifier.Authenticate's own doc comment and ADR
 // 0019, resolved sub-decision 1 — then validates and stores manifest as
