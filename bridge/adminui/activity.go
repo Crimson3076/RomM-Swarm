@@ -28,12 +28,12 @@ func (s *Server) handleActivityPage(w http.ResponseWriter, r *http.Request) {
 	data.AutoRefresh = true
 
 	if id := protocol.TransferID(r.URL.Query().Get("id")); id != "" {
-		history := s.Backend.Journal().History(id)
 		if err := id.Validate(); err != nil {
 			data.Error = "invalid transfer id"
 			renderPage(w, "activity", data)
 			return
 		}
+		history := s.Backend.Journal().History(id)
 		data.Detail = &activityDetail{ID: id, History: history}
 		renderPage(w, "activity", data)
 		return
