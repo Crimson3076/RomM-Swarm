@@ -1156,3 +1156,16 @@ func TestActivityRejectsAMalformedTransferID(t *testing.T) {
 		t.Fatalf("a path-shaped id was not rejected: %s", rec.Body.String())
 	}
 }
+
+func TestSetupPageRendersTheSetupTokenFieldWithoutTheToken(t *testing.T) {
+	s, _ := newTestServer(t)
+
+	resp := doRequest(t, s, nil, http.MethodGet, "/setup", nil)
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `name="setup_token"`) {
+		t.Fatalf("GET /setup: status %d, setup_token field missing", resp.StatusCode)
+	}
+	if strings.Contains(string(body), s.SetupToken) {
+		t.Fatal("GET /setup echoed the setup token")
+	}
+}
