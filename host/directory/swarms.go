@@ -104,6 +104,7 @@ func (d *Directory) DeleteSwarm(ctx context.Context, account protocol.UserID, sw
 		`DELETE FROM inventory_snapshots WHERE swarm_id = $1`,
 		`DELETE FROM bridge_swarm_memberships WHERE swarm_id = $1`,
 		`DELETE FROM invitations WHERE swarm_id = $1`,
+		`DELETE FROM swarm_reference_catalogues WHERE swarm_id = $1`,
 		`DELETE FROM swarm_memberships WHERE swarm_id = $1`,
 		`DELETE FROM swarms WHERE id = $1`,
 	} {

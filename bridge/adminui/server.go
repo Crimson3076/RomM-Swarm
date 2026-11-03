@@ -1,6 +1,7 @@
 package adminui
 
 import (
+	"bytes"
 	"embed"
 	"html/template"
 	"net/http"
@@ -38,7 +39,12 @@ func New(backend Backend, inboxDir string) *Server {
 	return s
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Referrer-Policy", "same-origin")
+	s.mux.ServeHTTP(w, r)
+}
 
 func (s *Server) routes() {
 	mux := http.NewServeMux()
@@ -71,6 +77,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /api/import", s.requireConfiguredAndAuth(s.handleImport))
 
 	mux.HandleFunc("GET /activity", s.requireConfiguredAndAuth(s.handleActivityPage))
+	mux.HandleFunc("GET /api/activity", s.requireConfiguredAndAuth(s.handleActivityJSON))
 
 	s.mux = mux
 }
@@ -82,12 +89,13 @@ type baseData struct {
 	Title         string
 	Authenticated bool
 	AutoRefresh   bool
+	Path          string
 	Error         string
 	Notice        string
 }
 
 func (s *Server) base(r *http.Request, title string) baseData {
-	return baseData{Title: title, Authenticated: s.authenticated(r)}
+	return baseData{Title: title, Authenticated: s.authenticated(r), Path: r.URL.Path}
 }
 
 // renderPage executes a named page template. A template execution error at
@@ -95,8 +103,11 @@ func (s *Server) base(r *http.Request, title string) baseData {
 // template — a programming error, not something the request caused — so it
 // is logged and turned into a plain 500 rather than partially written HTML.
 func renderPage(w http.ResponseWriter, name string, data any) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := pages.ExecuteTemplate(w, name, data); err != nil {
+	var body bytes.Buffer
+	if err := pages.ExecuteTemplate(&body, name, data); err != nil {
 		http.Error(w, "internal error rendering the page", http.StatusInternalServerError)
+		return
 	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = body.WriteTo(w)
 }

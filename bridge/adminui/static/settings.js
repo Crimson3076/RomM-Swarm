@@ -1,24 +1,24 @@
-document.getElementById("test-connection").addEventListener("click", async function () {
-  var result = document.getElementById("test-connection-result");
-  var url = document.getElementById("romm_url").value;
-  var token = document.getElementById("romm_token").value;
-  result.textContent = "Testing...";
-  try {
-    var resp = await fetch("/api/connection/test", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: "romm_url=" + encodeURIComponent(url) + "&romm_token=" + encodeURIComponent(token),
-    });
-    var data = await resp.json();
-    if (resp.ok) {
-      result.textContent = "Connected" + (data.server_version ? " (RomM " + data.server_version + ")" : "");
+(() => {
+  const button = document.getElementById("test-connection");
+  if (!button) return;
+  button.addEventListener("click", async () => {
+    const result = document.getElementById("test-connection-result");
+    result.textContent = "Testing connection...";
+    result.className = "";
+    button.disabled = true;
+    try {
+      const data = await window.SwarmUI.request("/api/connection/test", {
+        method: "POST",
+        body: new URLSearchParams({
+          romm_url: document.getElementById("romm_url").value,
+          romm_token: document.getElementById("romm_token").value
+        })
+      });
+      result.textContent = "Connected" + (data.server_version ? " (RomM " + data.server_version + ")" : "") + ".";
       result.className = "status-ok";
-    } else {
-      result.textContent = data.error || "Connection failed";
+    } catch (error) {
+      result.textContent = error.message;
       result.className = "status-bad";
-    }
-  } catch (e) {
-    result.textContent = "Request failed: " + e;
-    result.className = "status-bad";
-  }
-});
+    } finally { button.disabled = false; }
+  });
+})();

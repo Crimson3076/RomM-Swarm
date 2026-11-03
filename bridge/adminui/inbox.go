@@ -1,6 +1,7 @@
 package adminui
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -58,6 +59,19 @@ func (s *Server) handleInboxPage(w http.ResponseWriter, r *http.Request) {
 // handleImport triggers an import from either the mounted inbox directory
 // or a direct browser upload, per the "source" form field.
 func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
+	// Bound multipart staging and release parser-owned temporary files on every
+	// exit path, including validation failures.
+	r.Body = http.MaxBytesReader(w, r.Body, (1<<30)+(1<<20))
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		err := r.ParseMultipartForm(8 << 20)
+		if r.MultipartForm != nil {
+			defer r.MultipartForm.RemoveAll()
+		}
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, "could not read upload; maximum file size is 1 GiB")
+			return
+		}
+	}
 	platform := r.FormValue("platform")
 	if platform == "" {
 		writeJSONError(w, http.StatusBadRequest, "a platform is required")
@@ -89,6 +103,10 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer file.Close()
+		if header.Size > 1<<30 {
+			writeJSONError(w, http.StatusRequestEntityTooLarge, "maximum file size is 1 GiB")
+			return
+		}
 
 		tmp, err := os.CreateTemp("", "bridge-upload-*"+filepath.Ext(header.Filename))
 		if err != nil {
@@ -124,5 +142,13 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if strings.Contains(r.Header.Get("Accept"), "application/json") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]string{
+			"id": string(id), "activity_url": "/activity?id=" + string(id),
+		})
+		return
+	}
 	http.Redirect(w, r, "/activity?id="+string(id), http.StatusSeeOther)
 }

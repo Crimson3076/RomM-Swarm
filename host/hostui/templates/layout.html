@@ -3,24 +3,31 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{.Title}} — Host</title>
+  <meta name="color-scheme" content="dark">
+  <title>{{.Title}} | RomM Swarm Admin</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/ui.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to content</a>
 {{if .Authenticated}}
-<nav class="topnav">
-  <span class="brand">Network Host</span>
-  <a href="/">Dashboard</a>
-  <form method="post" action="/logout" class="logout-form">
-    <button type="submit" class="link-button">Log out</button>
-  </form>
-</nav>
+<aside class="sidebar">
+  <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">S</span><span>RomM Swarm<small>NETWORK ADMIN</small></span></a>
+  <p class="nav-label">Network</p>
+  <nav aria-label="Main navigation">
+    <a href="/" {{if eq .Path "/"}}aria-current="page"{{end}}>Dashboard</a>
+  </nav>
+  <form method="post" action="/logout" class="logout-form"><button type="submit" class="link-button">Log out</button></form>
+  <p class="sidebar-foot">Manage your private network.</p>
+</aside>
 {{end}}
-<main class="content">
-{{if .Error}}<div class="flash flash-error">{{.Error}}</div>{{end}}
-{{if .Notice}}<div class="flash flash-notice">{{.Notice}}</div>{{end}}
+<main id="main" class="content {{if not .Authenticated}}auth-content{{end}}">
+{{if not .Authenticated}}<div class="auth-brand brand"><span class="brand-mark" aria-hidden="true">S</span><span>RomM Swarm<small>NETWORK ADMIN</small></span></div>{{end}}
+{{if .Error}}<div class="flash flash-error" role="alert">{{.Error}}</div>{{end}}
+{{if .Notice}}<div class="flash flash-notice" role="status">{{.Notice}}</div>{{end}}
 {{end}}
 {{define "footer"}}
+<footer>RomM Swarm <span aria-hidden="true">&middot;</span> Network administration</footer>
 </main>
 </body>
 </html>

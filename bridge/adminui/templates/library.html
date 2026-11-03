@@ -1,29 +1,27 @@
 {{define "library"}}{{template "header" .}}
-<h1>Library</h1>
-<p>What your RomM server reports it holds. Pulling a copy streams it straight
-from RomM to your browser — nothing is staged on the Bridge for this.
-Listings are cached briefly; use Refresh if you just imported something
-directly on RomM and don't see it yet.</p>
-
-<form method="get" action="/library" class="form form-inline">
-  <label for="platform">Platform</label>
-  <input type="text" id="platform" name="platform" value="{{.Platform}}" placeholder="gb, gba, nds, genesis, or any slug RomM reports">
-  <button type="submit">Filter</button>
-</form>
-<form method="get" action="/library" class="form form-inline">
-  <input type="hidden" name="platform" value="{{.Platform}}">
-  <input type="hidden" name="refresh" value="1">
-  <button type="submit">Refresh</button>
-</form>
-
-{{if .Error}}<div class="flash flash-error">{{.Error}}</div>{{end}}
-
+<div class="page-heading"><div><p class="eyebrow">Collection</p><h1>My library</h1><p>Browse the games on your RomM server.</p></div><a class="button" href="/inbox">Import a game</a></div>
 {{if not .Error}}
-<table class="table" id="library-table" data-platform="{{.Platform}}">
-  <thead><tr><th>Name</th><th>Platform</th><th>Size</th><th></th></tr></thead>
-  <tbody id="library-rows"></tbody>
-</table>
-<p id="library-status">Loading your library&hellip; this can take a while the first time; cached after that.</p>
-<script src="/static/library.js"></script>
-{{end}}
+<div class="card">
+  <form method="get" action="/library" id="library-filter" class="toolbar">
+    <div class="search-field"><label for="library-query">Search title or filename</label><input type="search" id="library-query" name="q" value="{{.Query}}" placeholder="Find a game..." autocomplete="off"></div>
+    <div class="field"><label for="platform">Platform</label><select id="platform" name="platform"><option value="">All platforms</option>{{if .Platform}}<option value="{{.Platform}}" selected>{{.Platform}}</option>{{end}}</select></div>
+    <div class="field"><label for="library-sort">Sort by</label><select id="library-sort" name="sort">
+      <option value="name" {{if or (eq .Sort "") (eq .Sort "name")}}selected{{end}}>Title A to Z</option>
+      <option value="name_desc" {{if eq .Sort "name_desc"}}selected{{end}}>Title Z to A</option>
+      <option value="size_desc" {{if eq .Sort "size_desc"}}selected{{end}}>Largest first</option>
+      <option value="size_asc" {{if eq .Sort "size_asc"}}selected{{end}}>Smallest first</option>
+      <option value="platform" {{if eq .Sort "platform"}}selected{{end}}>Platform</option>
+    </select></div>
+    <button type="submit">Search</button><button type="button" class="secondary" id="library-refresh">Refresh</button>
+  </form>
+  <div class="table-wrap"><table class="table" id="library-table" data-platform="{{.Platform}}">
+    <thead><tr><th>Game</th><th>Platform</th><th>Size</th><th>Action</th></tr></thead><tbody id="library-rows"></tbody>
+  </table></div>
+  <div class="empty-state" id="library-empty" hidden><h2>No games found</h2><p>Try another title or platform, or refresh after adding games to RomM.</p></div>
+  <div class="pagination"><p id="library-status" role="status" aria-live="polite">Loading your library...</p><button class="secondary" type="button" id="library-more" hidden>Load more</button></div>
+</div>
+<p class="hint">Listings are cached briefly. Refresh asks RomM for a new listing. Downloads come from your own library.</p>
+<noscript><p class="flash flash-error">Enable JavaScript to browse the library.</p></noscript>
+<script src="/static/library.js" defer></script>
+{{else}}<a class="button" href="/settings">Open Settings</a>{{end}}
 {{template "footer" .}}{{end}}

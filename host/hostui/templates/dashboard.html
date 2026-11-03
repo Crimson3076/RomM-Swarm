@@ -1,28 +1,21 @@
 {{define "dashboard"}}{{template "header" .}}
-<h1>Dashboard</h1>
-
-<div class="card">
-  <h2>Swarms</h2>
-  {{if .Swarms}}
-  <table class="table">
-    <thead><tr><th>Name</th><th></th></tr></thead>
-    <tbody>
-    {{range .Swarms}}
-      <tr><td>{{.Name}}</td><td><a href="/swarms/{{.ID}}">View</a></td></tr>
-    {{end}}
-    </tbody>
-  </table>
-  {{else}}
-  <p>No Swarms yet.</p>
+<div class="page-heading"><div><p class="eyebrow">Network administration</p><h1>Dashboard</h1><p>Manage Swarms, invite Bridges, and review published holdings.</p></div><a href="#create-swarm" class="button">Create a Swarm</a></div>
+{{if .Swarms}}
+<div class="card-grid">
+  {{range .Swarms}}
+  <a class="card card-link" href="/swarms/{{.ID}}">
+    <p class="eyebrow">Private Swarm</p><h2>{{.Name}}</h2>
+    <strong class="stat-value">{{.Files}}</strong><p>distinct published files</p>
+    <p class="hint">{{.Bridges}} enrolled Bridges &middot; {{.Catalogues}} reference catalogues</p>
+    <span class="status-ok">Manage Swarm &rarr;</span>
+  </a>
   {{end}}
 </div>
-
-<div class="card">
-  <h2>Create a Swarm</h2>
-  <form method="post" action="/swarms" class="form">
-    <label for="name">Name</label>
-    <input type="text" id="name" name="name" required autofocus>
-    <button type="submit">Create Swarm</button>
-  </form>
+{{else}}
+<div class="card empty-state"><h2>No Swarms yet.</h2><p>Create your first Swarm, upload a reference catalogue, then invite a Bridge.</p></div>
+{{end}}
+<div class="card" id="create-swarm"><h2>Create a Swarm</h2>
+  <p class="hint">A private group with its own invitations, catalogue, and Bridge roster.</p>
+  <form method="post" action="/swarms" class="form"><label for="name">Swarm name</label><input type="text" id="name" name="name" required maxlength="120" placeholder="Home collection"><button type="submit">Create Swarm</button></form>
 </div>
 {{template "footer" .}}{{end}}

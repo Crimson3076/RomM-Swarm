@@ -8,6 +8,7 @@
 package hostui
 
 import (
+	"bytes"
 	"embed"
 	"html/template"
 	"net/http"
@@ -18,7 +19,7 @@ import (
 //go:embed templates/*.html
 var templateFS embed.FS
 
-//go:embed static/*.css
+//go:embed static/*.css static/*.js
 var staticFS embed.FS
 
 var pages = template.Must(template.ParseFS(templateFS, "templates/*.html"))
@@ -43,7 +44,12 @@ func New(d *directory.Directory) *Server {
 	return s
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Referrer-Policy", "same-origin")
+	s.mux.ServeHTTP(w, r)
+}
 
 func (s *Server) routes() {
 	mux := http.NewServeMux()
@@ -84,13 +90,14 @@ func handleHealthz(w http.ResponseWriter, r *http.Request) {
 type baseData struct {
 	Title         string
 	Authenticated bool
+	Path          string
 	Error         string
 	Notice        string
 }
 
 func (s *Server) base(r *http.Request, title string) baseData {
 	_, authenticated := s.authenticatedUser(r)
-	return baseData{Title: title, Authenticated: authenticated}
+	return baseData{Title: title, Authenticated: authenticated, Path: r.URL.Path}
 }
 
 // renderPage executes a named page template. A template execution error at
@@ -98,8 +105,11 @@ func (s *Server) base(r *http.Request, title string) baseData {
 // template — a programming error, not something the request caused — so it
 // is turned into a plain 500 rather than partially written HTML.
 func renderPage(w http.ResponseWriter, name string, data any) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := pages.ExecuteTemplate(w, name, data); err != nil {
+	var body bytes.Buffer
+	if err := pages.ExecuteTemplate(&body, name, data); err != nil {
 		http.Error(w, "internal error rendering the page", http.StatusInternalServerError)
+		return
 	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = body.WriteTo(w)
 }

@@ -1,94 +1,93 @@
-var testSwarmButton = document.getElementById("test-swarm");
-if (testSwarmButton) {
-  testSwarmButton.addEventListener("click", async function () {
-    var result = document.getElementById("test-swarm-result");
-    result.textContent = "Testing...";
+(() => {
+  const ui = window.SwarmUI;
+  const testButton = document.getElementById("test-swarm");
+  testButton?.addEventListener("click", async () => {
+    const result = document.getElementById("test-swarm-result");
+    testButton.disabled = true;
+    result.className = "";
+    result.textContent = "Testing the Host connection...";
     try {
-      var resp = await fetch("/api/swarm/test", { method: "POST" });
-      var data = await resp.json();
-      if (resp.ok) {
-        result.textContent = "Connected (generation " + data.generation + ", " + data.outcome + ")";
-        result.className = "status-ok";
-      } else {
-        result.textContent = data.error || "Connection failed";
-        result.className = "status-bad";
-      }
-    } catch (e) {
-      result.textContent = "Request failed: " + e;
+      const data = await ui.request("/api/swarm/test", {method: "POST"});
+      result.textContent = "Connected. Credential generation " + data.generation + ".";
+      result.className = "status-ok";
+    } catch (error) {
+      result.textContent = error.message;
       result.className = "status-bad";
-    }
+    } finally { testButton.disabled = false; }
   });
-}
 
-// Publish status is server-side state (Daemon.PublishStatus), not
-// something this script owns — it persists across a reload on its own.
-// This script's job is just to reflect it: render whatever the server
-// last told it, and poll while a publish is actually running so the page
-// updates live without the operator needing to reload.
-var publishStatusDiv = document.getElementById("publish-status");
-var publishStatusText = document.getElementById("publish-status-text");
-var publishInventoryButton = document.getElementById("publish-inventory");
-var publishPollTimer = null;
-
-function renderPublishStatus(data) {
-  if (!publishStatusText) return;
-  if (data.running) {
-    if (data.phase === "scanning") {
-      var platformPart = data.platform ?
-        " " + data.platform + " (platform " + data.platform_index + " of " + data.platform_total + ")" : "";
-      publishStatusText.textContent = "Scanning" + platformPart + " — " + data.items_scanned + " item(s) scanned so far…";
+  const button = document.getElementById("publish-inventory");
+  const output = document.getElementById("publish-status-text");
+  if (!button || !output) return;
+  let timer, polling = false, posting = false, running = false, sequence = 0, unauthorized = false;
+  function render(data) {
+    running = Boolean(data.running);
+    button.disabled = running || posting;
+    button.textContent = running ? "Publishing inventory..." : "Publish Inventory";
+    output.className = "";
+    if (running) {
+      output.textContent = data.phase === "scanning"
+        ? "Scanning " + (data.platform || "library") + " (" + data.platform_index + "/" + data.platform_total + " platforms), " + data.items_scanned + " items checked."
+        : "Sending the verified inventory to the Host...";
+    } else if (data.phase === "error") {
+      output.textContent = data.error || "Inventory publishing failed.";
+      output.className = "status-bad";
+    } else if (data.phase === "done" && data.result) {
+      if (data.result.published) {
+        output.textContent = "Published revision " + data.result.revision + ": " + data.result.item_count +
+          " holdings, " + data.result.skipped_count + " skipped. The Swarm reports " + data.result.distinct_files + " distinct files.";
+        output.className = "status-ok";
+      } else {
+        const reasons = Object.entries(data.result.skip_reasons || {}).map(([reason, count]) => reason + " (" + count + ")").join("; ");
+        output.textContent = "Nothing eligible to publish. " + (reasons || "Ask the Host administrator to check the reference catalogues.");
+      }
     } else {
-      publishStatusText.textContent = "Publishing to the Host…";
-    }
-    publishStatusText.className = "";
-  } else if (data.phase === "error") {
-    publishStatusText.textContent = data.error || "Publish failed";
-    publishStatusText.className = "status-bad";
-  } else if (data.phase === "done" && data.result) {
-    if (data.result.published) {
-      publishStatusText.textContent = "Published revision " + data.result.revision + ": " +
-        data.result.item_count + " item(s), " + data.result.distinct_files + " distinct file(s) swarm-wide";
-      publishStatusText.className = "status-ok";
-    } else {
-      var reasons = data.result.skip_reasons ? Object.keys(data.result.skip_reasons).map(function (k) {
-        return k + " (" + data.result.skip_reasons[k] + ")";
-      }).join(", ") : "";
-      publishStatusText.textContent = "Nothing published — " + (reasons || "no eligible holdings found");
-      publishStatusText.className = "status-bad";
+      output.textContent = "Ready to publish. Eligible holdings are verified against the Host's reference catalogues.";
     }
   }
-}
-
-function pollPublishStatus() {
-  fetch("/api/swarm/publish-status")
-    .then(function (resp) { return resp.json(); })
-    .then(function (data) {
-      renderPublishStatus(data);
-      publishPollTimer = data.running ? setTimeout(pollPublishStatus, 1500) : null;
-    })
-    .catch(function () {
-      publishPollTimer = setTimeout(pollPublishStatus, 3000);
-    });
-}
-
-if (publishStatusDiv && publishStatusDiv.dataset.running === "true") {
-  pollPublishStatus();
-}
-
-if (publishInventoryButton) {
-  publishInventoryButton.addEventListener("click", async function () {
+  function schedule() {
+    clearTimeout(timer);
+    if (!document.hidden && !unauthorized) timer = setTimeout(poll, running ? 1500 : 8000);
+  }
+  async function poll() {
+    if (polling || posting || document.hidden || unauthorized) return;
+    polling = true;
+    const version = sequence;
     try {
-      var resp = await fetch("/api/swarm/publish-inventory", { method: "POST" });
-      var data = await resp.json();
-      renderPublishStatus(data);
-      if (data.running && !publishPollTimer) {
-        publishPollTimer = setTimeout(pollPublishStatus, 1500);
+      const data = await ui.request("/api/swarm/publish-status");
+      if (version === sequence) render(data);
+    } catch (error) {
+      if (version === sequence) {
+        output.textContent = error.message;
+        output.className = "status-bad";
+        unauthorized = error.status === 401;
       }
-    } catch (e) {
-      if (publishStatusText) {
-        publishStatusText.textContent = "Request failed: " + e;
-        publishStatusText.className = "status-bad";
-      }
+    } finally {
+      polling = false;
+      if (!posting) schedule();
+    }
+  }
+  button.addEventListener("click", async () => {
+    if (posting || running) return;
+    posting = true;
+    sequence++;
+    clearTimeout(timer);
+    button.disabled = true;
+    output.textContent = "Starting inventory publish...";
+    try { render(await ui.request("/api/swarm/publish-inventory", {method: "POST"})); }
+    catch (error) {
+      output.textContent = error.message;
+      output.className = "status-bad";
+      unauthorized = error.status === 401;
+    } finally {
+      posting = false;
+      button.disabled = running;
+      schedule();
     }
   });
-}
+  document.addEventListener("visibilitychange", () => {
+    clearTimeout(timer);
+    if (!document.hidden) poll();
+  });
+  poll();
+})();
